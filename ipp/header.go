@@ -1,4 +1,4 @@
-package zp
+package ipp
 
 type Header interface {
 	Version() byte

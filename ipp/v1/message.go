@@ -3,21 +3,11 @@ package v1
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/godaner/ip/ipp"
 	"log"
 	"math"
 	"math/rand"
 	"time"
-)
-
-const (
-	type_req = 0x01
-)
-const (
-	attr_type_body = byte(1)
-)
-
-const (
-	versoin_v1 = 0x01
 )
 
 // Header
@@ -75,6 +65,11 @@ type Message struct {
 	AttrMaps map[byte][]byte
 }
 
+
+func (m *Message) AttributeByType(t byte) []byte {
+	return m.AttrMaps[t]
+}
+
 func (m *Message) Type() byte {
 	return m.Header.Type()
 }
@@ -86,7 +81,9 @@ func (m *Message) ReqId() uint16 {
 func (m *Message) SerialId() uint16 {
 	return m.Header.SerialNo()
 }
-
+func (m *Message) Attribute(index int) ipp.Attr {
+	return &m.Attr[index]
+}
 func (m *Message) Marshall() []byte {
 	buf := new(bytes.Buffer)
 	var err error
@@ -166,19 +163,28 @@ func (m *Message) UnMarshall(message []byte) {
 
 	}
 }
-
-func (m *Message) NewReq(body []byte, req uint16) {
-	m.newMessage(type_req, newSerialNo(), req)
+func (m *Message) ForHelloReq(body []byte, req uint16) {
+	m.newMessage(ipp.MSG_TYPE_HELLO, newSerialNo(), req)
 	m.Attr = []Attr{
 		{
-			AT: attr_type_body, AL: byte(len(body)), AV: body,
+			AT: ipp.ATTR_TYPE_PORT, AL: byte(len(body)), AV: body,
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
+func (m *Message) ForReq(body []byte, req uint16) {
+	m.newMessage(ipp.MSG_TYPE_REQ, newSerialNo(), req)
+	m.Attr = []Attr{
+		{
+			AT: ipp.ATTR_TYPE_BODY, AL: byte(len(body)), AV: body,
+		},
+	}
+	m.Header.HAttrNum = byte(len(m.Attr))
+}
+
 func (m *Message) newMessage(typ byte, serialNo, reqId uint16) {
 	header := Header{}
-	header.HVersion = versoin_v1
+	header.HVersion = ipp.VERSION_V1
 	header.HType = typ
 	header.HSerialNo = serialNo
 	header.HReqIdentifier = reqId
