@@ -42,7 +42,7 @@ func (h *Header) AttrNum() byte {
 // Attr
 type Attr struct {
 	AT byte
-	AL byte
+	AL uint16
 	AV []byte
 }
 
@@ -50,7 +50,7 @@ func (a *Attr) T() byte {
 	return a.AT
 }
 
-func (a *Attr) L() byte {
+func (a *Attr) L() uint16 {
 	return a.AL
 }
 
@@ -167,7 +167,7 @@ func (m *Message) ForHelloReq(body []byte, req uint16) {
 	m.newMessage(ipp.MSG_TYPE_HELLO, newSerialNo(), req)
 	m.Attr = []Attr{
 		{
-			AT: ipp.ATTR_TYPE_PORT, AL: byte(len(body)), AV: body,
+			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(body)), AV: body,
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
@@ -176,7 +176,7 @@ func (m *Message) ForReq(body []byte, req uint16) {
 	m.newMessage(ipp.MSG_TYPE_REQ, newSerialNo(), req)
 	m.Attr = []Attr{
 		{
-			AT: ipp.ATTR_TYPE_BODY, AL: byte(len(body)), AV: body,
+			AT: ipp.ATTR_TYPE_BODY, AL: uint16(len(body)), AV: body,
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))

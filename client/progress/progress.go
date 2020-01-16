@@ -1,7 +1,6 @@
 package progress
 
 import (
-	"fmt"
 	"github.com/godaner/ip/client/config"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
@@ -12,11 +11,16 @@ import (
 	"time"
 )
 
+const (
+	restart_interval = 5
+)
+
 type Progress struct {
 	ClientForwardConn net.Conn
 	ProxyConn         net.Conn
 	CID               uint16
 	Config            *config.Config
+	RestartSignal     chan int
 }
 
 func (p *Progress) Listen() (err error) {
@@ -27,27 +31,49 @@ func (p *Progress) Listen() (err error) {
 	}
 	p.CID = p.newSerialNo()
 	p.Config = c
+	p.RestartSignal = make(chan int)
 	// proxy conn
 	go func() {
-		addr := c.ProxyAddr
-		conn, err := net.Dial("tcp", addr)
-		if err != nil {
-			panic(err)
-		}
-		log.Printf("Progress#Listen : dial proxy addr is : %v !", addr)
-
-		p.ProxyConn = conn
-		// listen proxy return msg
-		go p.fromProxyHandler()
-		// say hello to proxy
-		m := ippnew.NewMessage(p.Config.IPPVersion)
-		m.ForHelloReq([]byte(c.ClientWannaProxyPort), p.CID)
-		_, err = p.ProxyConn.Write(m.Marshall())
-		if err != nil {
-			log.Printf("Progress#Listen : say hello to proxy err , err : %v !", err)
+		for {
+			select {
+			case <-p.RestartSignal:
+				log.Println("Progress#Listen : we will start the client !")
+				go func() {
+					p.listenProxy()
+				}()
+			default:
+			}
+			time.Sleep(restart_interval * time.Second)
 		}
 	}()
+	p.setRestartSignal()
 	return nil
+}
+func (p *Progress) setRestartSignal() {
+	p.RestartSignal <- 1
+}
+func (p *Progress) listenProxy() {
+	addr := p.Config.ProxyAddr
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Printf("Progress#Listen : dial proxy addr err , err is : %v !", err)
+		p.setRestartSignal()
+		return
+	}
+	log.Printf("Progress#Listen : dial proxy addr is : %v !", addr)
+
+	p.ProxyConn = conn
+	// listen proxy return msg
+	go func() {
+		p.fromProxyHandler()
+	}()
+	// say hello to proxy
+	m := ippnew.NewMessage(p.Config.IPPVersion)
+	m.ForHelloReq([]byte(p.Config.ClientWannaProxyPort), p.CID)
+	_, err = p.ProxyConn.Write(m.Marshall())
+	if err != nil {
+		log.Printf("Progress#Listen : say hello to proxy err , err : %v !", err)
+	}
 }
 
 // fromProxyHandler
@@ -56,27 +82,34 @@ func (p *Progress) fromProxyHandler() {
 	for {
 		// parse protocol
 		bs := make([]byte, 1024, 1024)
-		n, _ := p.ProxyConn.Read(bs)
+		n, err := p.ProxyConn.Read(bs)
+		s:=bs[0:n]
+		log.Printf("Progress#fromProxyHandler : receive proxy msg , msg is : %v , len is : %v !",string(s),n)
+		if err != nil {
+			log.Printf("Progress#fromClientConnHandler : receive proxy err , err is : %v !", err)
+			p.setRestartSignal()
+			return
+		}
+		if n<=0{
+			continue
+		}
 		m := ippnew.NewMessage(p.Config.IPPVersion)
-		m.UnMarshall(bs[0:n])
+		m.UnMarshall(s)
 		switch m.Type() {
 		case ipp.MSG_TYPE_HELLO:
 			log.Println("Progress#fromClientConnHandler : receive proxy hello !")
-			// proxy return hello , we should dial forward addr
-			addr := p.Config.ClientForwardAddr
-			conn, err := net.Dial("tcp", addr)
-			if err != nil {
-				panic(err)
-			}
-			p.ClientForwardConn = conn
-			log.Printf("Progress#fromProxyHandler : receive proxy hello , dial forward addr is : %v !", addr)
 			// listen forward's conn
 			go p.fromForwardConnHandler()
 		case ipp.MSG_TYPE_REQ:
 			log.Println("Progress#fromProxyHandler : receive proxy req !")
 			// receive proxy req info , we should dispatch the info
-			b:=m.AttributeByType(ipp.ATTR_TYPE_BODY)
-			fmt.Println(string(b))
+			b := m.AttributeByType(ipp.ATTR_TYPE_BODY)
+			log.Printf("Progress#fromProxyHandler : receive proxy req , body is : %v", string(b))
+			if p.ClientForwardConn == nil {
+				log.Println("Progress#fromClientConnHandler : ClientForwardConn is nil !")
+				p.setRestartSignal()
+				return
+			}
 			n, err := p.ClientForwardConn.Write(b)
 			if err != nil {
 				log.Printf("Progress#fromProxyHandler : receive proxy req , forward err , err : %v !", err)
@@ -92,16 +125,33 @@ func (p *Progress) fromProxyHandler() {
 // fromForwardConnHandler
 //  监听forward返回的消息
 func (p *Progress) fromForwardConnHandler() {
+	// proxy return hello , we should dial forward addr
+	addr := p.Config.ClientForwardAddr
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Printf("Progress#fromForwardConnHandler : after get proxy hello , dial forward err , err is : %v !", err)
+		p.setRestartSignal()
+		return
+	}
+	p.ClientForwardConn = conn
+	log.Printf("Progress#fromForwardConnHandler : dial forward addr success , forward address is : %v !", addr)
 	for {
 		log.Println("Progress#fromForwardConnHandler : wait receive forward msg !")
 		bs := make([]byte, 1024, 1024)
-		n, _ := p.ClientForwardConn.Read(bs)
-		log.Println("Progress#fromForwardConnHandler : receive forward msg !")
+		n, err := p.ClientForwardConn.Read(bs)
+		if err != nil {
+			log.Printf("Progress#fromForwardConnHandler : read forward data err , err is : %v !", err)
+			p.setRestartSignal()
+			return
+		}
+		log.Printf("Progress#fromForwardConnHandler : receive forward msg , msg is : %v , len is : %v !", string(bs[0:n]), n)
 		m := ippnew.NewMessage(p.Config.IPPVersion)
 		m.ForReq(bs[0:n], p.CID)
-		_, err := p.ProxyConn.Write(m.Marshall())
+		_, err = p.ProxyConn.Write(m.Marshall())
 		if err != nil {
 			log.Printf("Progress#fromForwardConnHandler : write forward's data to proxy is : %v !", err.Error())
+			p.setRestartSignal()
+			return
 		}
 	}
 }
