@@ -65,7 +65,6 @@ type Message struct {
 	AttrMaps map[byte][]byte
 }
 
-
 func (m *Message) AttributeByType(t byte) []byte {
 	return m.AttrMaps[t]
 }
@@ -162,6 +161,14 @@ func (m *Message) UnMarshall(message []byte) {
 		m.AttrMaps[attr.AT] = attr.AV
 
 	}
+}
+
+func (m *Message) ForConnCreate(body []byte, req uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, newSerialNo(), req)
+}
+
+func (m *Message) ForConnClose(body []byte, req uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CLOSE, newSerialNo(), req)
 }
 func (m *Message) ForHelloReq(body []byte, req uint16) {
 	m.newMessage(ipp.MSG_TYPE_HELLO, newSerialNo(), req)

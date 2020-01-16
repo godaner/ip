@@ -5,15 +5,19 @@ import (
 	"github.com/godaner/ip/ipp/ippnew"
 	"github.com/godaner/ip/proxy/config"
 	"log"
+	"math"
+	"math/rand"
 	"net"
+	"time"
 )
 
 type Progress struct {
 	Config                *config.Config
-	ClientCIDPort         map[uint16]string
-	BrowserPortConns      map[string][]net.Conn
+	//ClientCIDPort         map[uint16]string
+	//BrowserPortConns      map[string][]net.Conn
 	ClientsListener       net.Listener
-	ClientWannaProxyPorts map[string]net.Listener
+	//ClientWannaProxyPorts map[string]net.Listener
+	BrowserAndClientConns map[uint16]*BrowserAndClientConn
 }
 
 func (p *Progress) Listen() (err error) {
@@ -23,9 +27,10 @@ func (p *Progress) Listen() (err error) {
 		return err
 	}
 	p.Config = c
-	p.BrowserPortConns = map[string][]net.Conn{}
-	p.ClientCIDPort = map[uint16]string{}
-	p.ClientWannaProxyPorts = map[string]net.Listener{}
+	//p.BrowserPortConns = map[string][]net.Conn{}
+	//p.ClientCIDPort = map[uint16]string{}
+	//p.ClientWannaProxyPorts = map[string]net.Listener{}
+	p.BrowserAndClientConns = map[uint16]*BrowserAndClientConn{}
 	// from client conn
 	go func() {
 		addr := ":" + c.LocalPort
@@ -49,7 +54,7 @@ func (p *Progress) fromClientConnHandler() {
 		go func() {
 			for {
 				// parse protocol
-				bs := make([]byte, 1024, 1024)
+				bs := make([]byte, 4096, 4096)
 				n, err := conn.Read(bs)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read info from client err , err is : %v !", err.Error())
@@ -62,13 +67,13 @@ func (p *Progress) fromClientConnHandler() {
 					log.Println("Progress#fromClientConnHandler : receive client hello !")
 					// receive client hello , we should listen the client_wanna_proxy_port , and dispatch browser data to this client.
 					clientWannaProxyPort := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))
-					go p.clientHelloHandler(m.ReqId(), conn, clientWannaProxyPort)
+					go p.clientHelloHandler( conn, clientWannaProxyPort)
 				case ipp.MSG_TYPE_REQ:
 					// receive client req , we should judge the client port , and dispatch the data to all browser who connect to this port.
 					port := p.ClientCIDPort[m.ReqId()]
 					browserConns := p.BrowserPortConns[port]
 					data := m.AttributeByType(ipp.ATTR_TYPE_BODY)
-					log.Printf("Progress#fromClientConnHandler : receive client req , data is : %v", string(data))
+					log.Printf("Progress#fromClientConnHandler : receive client req , data is : %v , len is : %v !", string(data),len(data))
 					tc := len(browserConns)
 					sc := int64(0)
 					for _, bc := range browserConns {
@@ -109,12 +114,18 @@ func (p *Progress) ListenClientWannaProxyPort(clientWannaProxyPort string) (l ne
 	}
 	return l, err
 }
-func (p *Progress) clientHelloHandler(cID uint16, clientConn net.Conn, clientWannaProxyPort string) {
-	// remember cID port relation
-	p.ClientCIDPort[cID] = clientWannaProxyPort
+type BrowserAndClientConn struct {
+	id uint16
+	clientConn net.Conn
+	browserConn net.Conn
+}
+// clientHelloHandler
+//  处理client发送过来的hello
+func (p *Progress) clientHelloHandler(clientConn net.Conn, clientWannaProxyPort string) {
 	// return server hello
+	rID:=p.newSerialNo()
 	m := ippnew.NewMessage(p.Config.IPPVersion)
-	m.ForHelloReq([]byte{}, cID)
+	m.ForHelloReq([]byte{}, rID)
 	_, err := clientConn.Write(m.Marshall())
 	if err != nil {
 		log.Printf("Progress#clientHelloHandler : return server hello err , err is : %v !", err.Error())
@@ -125,35 +136,34 @@ func (p *Progress) clientHelloHandler(cID uint16, clientConn net.Conn, clientWan
 		log.Printf("Progress#clientHelloHandler : listen clientWannaProxyPort err , err is : %v !", err)
 		return
 	}
-	log.Printf("Progress#clientHelloHandler : proxy port is : %v !", clientWannaProxyPort)
+	log.Printf("Progress#clientHelloHandler : listen browser port is : %v !", clientWannaProxyPort)
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			log.Printf("Progress#clientHelloHandler : accept conn err , err is : %v !", err.Error())
+			log.Printf("Progress#clientHelloHandler : accept browser conn err , err is : %v !", err.Error())
 			break
 		}
-		log.Printf("Progress#clientHelloHandler : accept a browser conn success , clientWannaProxyPort is : %v , browser addr is : %v !", clientWannaProxyPort, conn.RemoteAddr())
-		// remember browser port conns relation
-		conns, ok := p.BrowserPortConns[clientWannaProxyPort]
-		if !ok {
-			conns = []net.Conn{}
+		// save client conn and browser conn relation
+		p.BrowserAndClientConns[rID]=&BrowserAndClientConn{
+			id:          rID,
+			clientConn:  clientConn,
+			browserConn: conn,
 		}
-		conns = p.addConn(conn, conns)
-		p.BrowserPortConns[clientWannaProxyPort] = conns
+		log.Printf("Progress#clientHelloHandler : accept a browser conn success , clientWannaProxyPort is : %v , browser addr is : %v !", clientWannaProxyPort, conn.RemoteAddr())
 		go func() {
-			// one browser
+			// read browser request
 			for {
 				// build protocol to client
-				bs := make([]byte, 1024, 1024)
+				bs := make([]byte, 4096, 4096)
 				n, err := conn.Read(bs)
-				log.Println("Progress#clientHelloHandler : accept browser req !")
+				s := bs[0:n]
+				log.Printf("Progress#clientHelloHandler : accept browser req , msg is : %v , len is : %v !",string(s),len(s))
 				if err != nil {
 					log.Printf("Progress#clientHelloHandler : read browser data err , err is : %v !", err.Error())
 					break
 				}
 				m := ippnew.NewMessage(p.Config.IPPVersion)
-				s := bs[0:n]
-				m.ForReq(s, cID)
+				m.ForReq(s, rID)
 				n, err = clientConn.Write(m.Marshall())
 				if err != nil {
 					log.Printf("Progress#clientHelloHandler : send browser data to client err , err is : %v !", err.Error())
@@ -173,4 +183,12 @@ func (p *Progress) addConn(conn net.Conn, conns []net.Conn) (cs []net.Conn) {
 		cs = append(cs, c)
 	}
 	return cs
+}
+
+
+//产生随机序列号
+func (p *Progress) newSerialNo() uint16 {
+	rand.Seed(time.Now().UnixNano())
+	r := rand.Intn(math.MaxUint16)
+	return uint16(r)
 }

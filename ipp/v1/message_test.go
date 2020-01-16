@@ -44,7 +44,7 @@ func TestMessage_Marshall(t *testing.T) {
 					for {
 						fmt.Println("2")
 						cc.So(err, ShouldBeNil)
-						bs := make([]byte, 1024, 1024)
+						bs := make([]byte, 4096, 4096)
 						n, err := conn.Read(bs)
 						cc.So(err, ShouldBeNil)
 						s := string(bs[0:n]) + "1"
@@ -60,7 +60,7 @@ func TestMessage_Marshall(t *testing.T) {
 		cc.So(err, ShouldBeNil)
 		go func(cc C) {
 			for {
-				bs := make([]byte, 1024, 1024)
+				bs := make([]byte, 4096, 4096)
 				n, err := conn.Read(bs)
 				fmt.Println("3")
 				cc.So(err, ShouldBeNil)
