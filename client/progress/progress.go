@@ -33,6 +33,7 @@ func (p *Progress) Listen() (err error) {
 	//p.CID = p.newSerialNo()
 	p.Config = c
 	p.RestartSignal = make(chan int)
+	p.ForwardConnRID = map[uint16]net.Conn{}
 	// proxy conn
 	go func() {
 		for {
@@ -70,7 +71,7 @@ func (p *Progress) listenProxy() {
 	}()
 	// say hello to proxy
 	m := ippnew.NewMessage(p.Config.IPPVersion)
-	m.ForHelloReq([]byte(p.Config.ClientWannaProxyPort), p.CID)
+	m.ForHelloReq([]byte(p.Config.ClientWannaProxyPort), 0)
 	_, err = p.ProxyConn.Write(m.Marshall())
 	if err != nil {
 		log.Printf("Progress#Listen : say hello to proxy err , err : %v !", err)
@@ -109,7 +110,7 @@ func (p *Progress) fromProxyHandler() {
 			// receive proxy req info , we should dispatch the info
 			b := m.AttributeByType(ipp.ATTR_TYPE_BODY)
 			log.Printf("Progress#fromProxyHandler : receive proxy req , body is : %v , len is : %v !", string(b), len(b))
-			conn:=p.ForwardConnRID[m.ReqId()]
+			conn := p.ForwardConnRID[m.ReqId()]
 			if conn == nil {
 				log.Println("Progress#fromClientConnHandler : ClientForwardConn is nil !")
 				p.setRestartSignal()
@@ -132,7 +133,7 @@ func (p *Progress) fromProxyHandler() {
 func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 	// proxy return browser conn create , we should dial forward addr
 	addr := p.Config.ClientForwardAddr
-	conn, err := net.Dial("tcp", addr)
+	forwardConn, err := net.Dial("tcp", addr)
 	if err != nil {
 		// todo 是否重新拨号？？
 		log.Printf("Progress#proxyCreateBrowserConnHandler : after get proxy hello , dial forward err , err is : %v !", err)
@@ -140,12 +141,12 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 		return
 	}
 	//p.ClientForwardConn = conn
-	p.ForwardConnRID[cID] = conn
-	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , forward address is : %v !", conn.RemoteAddr())
+	p.ForwardConnRID[cID] = forwardConn
+	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , forward address is : %v !", forwardConn.RemoteAddr())
 	for {
 		log.Println("Progress#proxyCreateBrowserConnHandler : wait receive forward msg !")
 		bs := make([]byte, 4096, 4096)
-		n, err := conn.Read(bs)
+		n, err := forwardConn.Read(bs)
 		if err != nil {
 			// todo 如果连接被关闭，是否重新拨号？？
 			log.Printf("Progress#proxyCreateBrowserConnHandler : read forward data err , err is : %v !", err)
@@ -164,6 +165,7 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 		}
 	}
 }
+
 // proxyCloseBrowserConnHandler
 func (p *Progress) proxyCloseBrowserConnHandler(cID uint16) {
 	c, _ := p.ForwardConnRID[cID]
