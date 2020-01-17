@@ -85,13 +85,13 @@ func (p *Progress) fromProxyHandler() {
 		// parse protocol
 		bs := make([]byte, 4096, 4096)
 		n, err := p.ProxyConn.Read(bs)
-		s := bs[0:n]
-		log.Printf("Progress#fromProxyHandler : receive proxy msg , msg is : %v , len is : %v !", string(s), n)
 		if err != nil {
 			log.Printf("Progress#fromClientConnHandler : receive proxy err , err is : %v !", err)
 			p.setRestartSignal()
 			return
 		}
+		s := bs[0:n]
+		log.Printf("Progress#fromProxyHandler : receive proxy msg , msg is : %v , len is : %v !", string(s), n)
 		if n <= 0 {
 			continue
 		}
@@ -102,25 +102,23 @@ func (p *Progress) fromProxyHandler() {
 			log.Println("Progress#fromClientConnHandler : receive proxy hello !")
 		case ipp.MSG_TYPE_CONN_CREATE:
 			log.Println("Progress#fromClientConnHandler : receive proxy conn create !")
-			go p.proxyCreateBrowserConnHandler(m.ReqId())
+			go p.proxyCreateBrowserConnHandler(m.CID())
 		case ipp.MSG_TYPE_CONN_CLOSE:
-			go p.proxyCloseBrowserConnHandler(m.ReqId())
+			log.Println("Progress#fromClientConnHandler : receive proxy conn close !")
+			go p.proxyCloseBrowserConnHandler(m.CID())
 		case ipp.MSG_TYPE_REQ:
 			log.Println("Progress#fromProxyHandler : receive proxy req !")
 			// receive proxy req info , we should dispatch the info
 			b := m.AttributeByType(ipp.ATTR_TYPE_BODY)
 			log.Printf("Progress#fromProxyHandler : receive proxy req , body is : %v , len is : %v !", string(b), len(b))
-			conn := p.ForwardConnRID[m.ReqId()]
-			if conn == nil {
-				log.Println("Progress#fromClientConnHandler : ClientForwardConn is nil !")
-				p.setRestartSignal()
-				return
+			forwardConn := p.ForwardConnRID[m.CID()]
+			if forwardConn != nil {
+				n, err := forwardConn.Write(b)
+				if err != nil {
+					log.Printf("Progress#fromProxyHandler : receive proxy req , forward err , err : %v !", err)
+				}
+				log.Printf("Progress#fromProxyHandler : from proxy to forward , msg is : %v , len is : %v !", string(b), n)
 			}
-			n, err := conn.Write(b)
-			if err != nil {
-				log.Printf("Progress#fromProxyHandler : receive proxy req , forward err , err : %v !", err)
-			}
-			log.Printf("Progress#fromProxyHandler : from proxy to forward , msg is : %v , len is : %v !", string(b), n)
 		default:
 			log.Println("Progress#fromProxyHandler : receive proxy msg , but can't find type !")
 		}
@@ -135,12 +133,11 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 	addr := p.Config.ClientForwardAddr
 	forwardConn, err := net.Dial("tcp", addr)
 	if err != nil {
-		// todo 是否重新拨号？？
-		log.Printf("Progress#proxyCreateBrowserConnHandler : after get proxy hello , dial forward err , err is : %v !", err)
-		//p.setRestartSignal()
+		// if dial fail , tell proxy to close browser conn
+		log.Printf("Progress#proxyCreateBrowserConnHandler : after get proxy browser conn create , dial forward err , err is : %v !", err)
+		p.sendForwardConnCloseEvent(cID)
 		return
 	}
-	//p.ClientForwardConn = conn
 	p.ForwardConnRID[cID] = forwardConn
 	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , forward address is : %v !", forwardConn.RemoteAddr())
 	for {
@@ -148,9 +145,13 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 		bs := make([]byte, 4096, 4096)
 		n, err := forwardConn.Read(bs)
 		if err != nil {
-			// todo 如果连接被关闭，是否重新拨号？？
 			log.Printf("Progress#proxyCreateBrowserConnHandler : read forward data err , err is : %v !", err)
-			//p.setRestartSignal()
+			// lost connection , notify proxy
+			_, ok := p.ForwardConnRID[cID]
+			if ok {
+				delete(p.ForwardConnRID, cID)
+				p.sendForwardConnCloseEvent(cID)
+			}
 			return
 		}
 		log.Printf("Progress#proxyCreateBrowserConnHandler : receive forward msg , msg is : %v , len is : %v !", string(bs[0:n]), n)
@@ -158,12 +159,21 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 		m.ForReq(bs[0:n], cID)
 		_, err = p.ProxyConn.Write(m.Marshall())
 		if err != nil {
-			// todo 如果连接被关闭，是否重新拨号？？
 			log.Printf("Progress#proxyCreateBrowserConnHandler : write forward's data to proxy is : %v !", err.Error())
-			//p.setRestartSignal()
+			p.setRestartSignal()
 			return
 		}
 	}
+}
+func (p *Progress) sendForwardConnCloseEvent(cID uint16) (success bool) {
+	m := ippnew.NewMessage(p.Config.IPPVersion)
+	m.ForConnClose([]byte{}, cID)
+	_, err := p.ProxyConn.Write(m.Marshall())
+	if err != nil {
+		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , err is : %v !", err.Error())
+		return false
+	}
+	return true
 }
 
 // proxyCloseBrowserConnHandler

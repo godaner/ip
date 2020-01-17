@@ -30,12 +30,11 @@ type Message interface {
 	UnMarshall(message []byte)
 	Marshall() []byte
 	Type() byte
-	ReqId() uint16
-	SerialId() uint16
+	CID() uint16
 	Attribute(int) Attr
 	AttributeByType(byte) []byte
-	ForReq(body []byte, req uint16)
-	ForHelloReq(body []byte, req uint16)
-	ForConnCreate(body []byte, req uint16)
-	ForConnClose(body []byte, req uint16)
+	ForReq(body []byte, cID uint16)
+	ForHelloReq(body []byte, cID uint16)
+	ForConnCreate(body []byte, cID uint16)
+	ForConnClose(body []byte, cID uint16)
 }
