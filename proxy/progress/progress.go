@@ -26,6 +26,8 @@ func (p *Progress) Listen() (err error) {
 	p.Config = c
 	p.ClientWannaProxyPorts = map[string]net.Listener{}
 	p.BrowserConnRID = map[uint16]net.Conn{}
+	// log
+	log.SetFlags(log.Lmicroseconds)
 	// from client conn
 	go func() {
 		addr := ":" + c.LocalPort

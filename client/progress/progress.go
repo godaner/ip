@@ -34,6 +34,8 @@ func (p *Progress) Listen() (err error) {
 	p.Config = c
 	p.RestartSignal = make(chan int)
 	p.ForwardConnRID = map[uint16]net.Conn{}
+	// log
+	log.SetFlags(log.Lmicroseconds)
 	// proxy conn
 	go func() {
 		for {
@@ -105,7 +107,11 @@ func (p *Progress) fromProxyHandler() {
 			go p.proxyCreateBrowserConnHandler(m.CID())
 		case ipp.MSG_TYPE_CONN_CLOSE:
 			log.Println("Progress#fromClientConnHandler : receive proxy conn close !")
-			go p.proxyCloseBrowserConnHandler(m.CID())
+			go func() {
+				cID:=m.CID()
+				p.proxyCloseBrowserConnHandler(cID)
+				delete(p.ForwardConnRID, cID)
+			}()
 		case ipp.MSG_TYPE_REQ:
 			log.Println("Progress#fromProxyHandler : receive proxy req !")
 			// receive proxy req info , we should dispatch the info
