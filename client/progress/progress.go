@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -35,6 +36,12 @@ func (p *Progress) Listen() (err error) {
 
 	// log
 	log.SetFlags(log.Lmicroseconds)
+	f, err := os.OpenFile("./ipclient.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Println("Progress#Listen : open file err :", err.Error())
+		return
+	}
+	log.SetOutput(f)
 	// proxy conn
 	go func() {
 		for {
@@ -97,7 +104,7 @@ func (p *Progress) listenProxy() {
 func (p *Progress) fromProxyHandler() {
 	for {
 		// parse protocol
-		bs := make([]byte, 4096, 4096)
+		bs := make([]byte, 10240, 10240)
 		n, err := p.ProxyConn.Read(bs)
 		if err != nil {
 			log.Printf("Progress#fromClientConnHandler : receive proxy err , err is : %v !", err)
@@ -140,6 +147,9 @@ func (p *Progress) fromProxyReqHandler(m ipp.Message) {
 	cID := m.CID()
 	b := m.AttributeByType(ipp.ATTR_TYPE_BODY)
 	log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v , body is : %v , len is : %v !", cID, string(b), len(b))
+	if len(b) <= 0 {
+		return
+	}
 	// some times the conn create , and proxy send req , but the forward conn is not ok.
 	// we will wait the dial 5s
 	var forwardConn net.Conn
@@ -189,7 +199,7 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , forward address is : %v !", cID, forwardConn.RemoteAddr())
 	for {
 		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v !", cID)
-		bs := make([]byte, 4096, 4096)
+		bs := make([]byte, 10240, 10240)
 		n, err := forwardConn.Read(bs)
 		if err != nil {
 			log.Printf("Progress#proxyCreateBrowserConnHandler : read forward data err , cID is : %v , err is : %v !", cID, err)
@@ -202,6 +212,9 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 			return
 		}
 		log.Printf("Progress#proxyCreateBrowserConnHandler : receive forward msg , cID is : %v , msg is : %v , len is : %v !", cID, string(bs[0:n]), n)
+		if n <= 0 {
+			return
+		}
 		m := ippnew.NewMessage(p.Config.IPPVersion)
 		m.ForReq(bs[0:n], cID)
 		_, err = p.ProxyConn.Write(m.Marshall())
