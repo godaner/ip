@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"encoding/binary"
 	"github.com/godaner/ip/client/config"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
@@ -8,7 +9,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"os"
 	"sync"
 	"time"
 )
@@ -36,12 +36,6 @@ func (p *Progress) Listen() (err error) {
 
 	// log
 	log.SetFlags(log.Lmicroseconds)
-	f, err := os.OpenFile("./ipclient.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Println("Progress#Listen : open file err :", err.Error())
-		return
-	}
-	log.SetOutput(f)
 	// proxy conn
 	go func() {
 		for {
@@ -104,7 +98,10 @@ func (p *Progress) listenProxy() {
 func (p *Progress) fromProxyHandler() {
 	for {
 		// parse protocol
-		bs := make([]byte, 10240, 10240)
+		length := make([]byte, 4, 4)
+		n, _ := p.ProxyConn.Read(length)
+		ippLength := binary.BigEndian.Uint32(length)
+		bs := make([]byte, ippLength, ippLength)
 		n, err := p.ProxyConn.Read(bs)
 		if err != nil {
 			log.Printf("Progress#fromClientConnHandler : receive proxy err , err is : %v !", err)
@@ -199,7 +196,7 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , forward address is : %v !", cID, forwardConn.RemoteAddr())
 	for {
 		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v !", cID)
-		bs := make([]byte, 10240, 10240)
+		bs := make([]byte, 1024, 1024)
 		n, err := forwardConn.Read(bs)
 		if err != nil {
 			log.Printf("Progress#proxyCreateBrowserConnHandler : read forward data err , cID is : %v , err is : %v !", cID, err)

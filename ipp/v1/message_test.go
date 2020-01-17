@@ -24,8 +24,7 @@ func TestVersion_NewReq(t *testing.T) {
 		m2.UnMarshall(b)
 		t.Logf("after uma is : %v !",m2.Marshall())
 		So(m2, ShouldNotBeNil)
-		So(m2.SerialId(), ShouldBeGreaterThan, 0)
-		So(m2.ReqId(), ShouldEqual, ri)
+		So(m2.CID(), ShouldEqual, ri)
 		So(len(m2.Marshall()), ShouldBeGreaterThan, 0)
 		t.Logf("bytes is : %v !", m2.Marshall())
 
@@ -44,7 +43,7 @@ func TestMessage_Marshall(t *testing.T) {
 					for {
 						fmt.Println("2")
 						cc.So(err, ShouldBeNil)
-						bs := make([]byte, 10240, 10240)
+						bs := make([]byte, 40920, 40920)
 						n, err := conn.Read(bs)
 						cc.So(err, ShouldBeNil)
 						s := string(bs[0:n]) + "1"
@@ -60,7 +59,7 @@ func TestMessage_Marshall(t *testing.T) {
 		cc.So(err, ShouldBeNil)
 		go func(cc C) {
 			for {
-				bs := make([]byte, 10240, 10240)
+				bs := make([]byte, 40920, 40920)
 				n, err := conn.Read(bs)
 				fmt.Println("3")
 				cc.So(err, ShouldBeNil)

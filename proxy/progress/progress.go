@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"encoding/binary"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
 	"github.com/godaner/ip/proxy/config"
@@ -8,7 +9,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"os"
 	"sync"
 	"time"
 )
@@ -30,12 +30,6 @@ func (p *Progress) Listen() (err error) {
 	p.BrowserConnRID = sync.Map{}        // map[uint16]net.Conn{}
 	// log
 	log.SetFlags(log.Lmicroseconds)
-	f, err := os.OpenFile("./ipproxy.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Println("Progress#Listen : open file err :", err.Error())
-		return
-	}
-	log.SetOutput(f)
 	// from client conn
 	go func() {
 		addr := ":" + c.LocalPort
@@ -58,8 +52,11 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 		go func() {
 			for {
 				// parse protocol
-				bs := make([]byte, 10240, 10240)
-				n, err := clientConn.Read(bs)
+				length := make([]byte, 4, 4)
+				n, _ := clientConn.Read(length)
+				ippLength := binary.BigEndian.Uint32(length)
+				bs := make([]byte, ippLength, ippLength)
+				n, err = clientConn.Read(bs)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
@@ -202,13 +199,10 @@ func (p *Progress) clientHelloHandler(clientConn net.Conn, clientWannaProxyPort 
 			// read browser request
 			for {
 				// build protocol to client
-				bs := make([]byte, 10240, 10240)
+				bs := make([]byte, 1024, 1024)
 				n, err := browserConn.Read(bs)
 				s := bs[0:n]
 				log.Printf("Progress#clientHelloHandler : accept browser req , cID is : %v , msg is : %v , len is : %v !", cID, string(s), len(s))
-				if n <= 0 {
-					continue
-				}
 				if err != nil {
 					log.Printf("Progress#clientHelloHandler : read browser data err , cID is : %v , err is : %v !", cID, err.Error())
 					_, ok := p.BrowserConnRID.Load(cID)
@@ -217,6 +211,9 @@ func (p *Progress) clientHelloHandler(clientConn net.Conn, clientWannaProxyPort 
 						p.BrowserConnRID.Delete(cID)
 					}
 					break
+				}
+				if n <= 0 {
+					continue
 				}
 				m := ippnew.NewMessage(p.Config.IPPVersion)
 				m.ForReq(s, cID)

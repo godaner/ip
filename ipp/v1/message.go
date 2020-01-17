@@ -34,7 +34,7 @@ func (h *Header) AttrNum() byte {
 // Attr
 type Attr struct {
 	AT byte
-	AL uint16
+	AL uint32
 	AV []byte
 }
 
@@ -42,7 +42,7 @@ func (a *Attr) T() byte {
 	return a.AT
 }
 
-func (a *Attr) L() uint16 {
+func (a *Attr) L() uint32 {
 	return a.AL
 }
 
@@ -56,6 +56,7 @@ type Message struct {
 	Attr     []Attr
 	AttrMaps map[byte][]byte
 }
+
 
 func (m *Message) AttributeByType(t byte) []byte {
 	return m.AttrMaps[t]
@@ -104,7 +105,12 @@ func (m *Message) Marshall() []byte {
 			log.Printf("Message#Bytes : binary.Write m.Header.AttrStr err , err is : %v !", err.Error())
 		}
 	}
-	return buf.Bytes()
+	body := buf.Bytes()
+	// be careful !!
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(len(body)))
+	body = append(ippLen, body...)
+	return body
 }
 
 func (m *Message) UnMarshall(message []byte) {
@@ -155,7 +161,7 @@ func (m *Message) ForHelloReq(body []byte, cID uint16) {
 	m.newMessage(ipp.MSG_TYPE_HELLO, cID)
 	m.Attr = []Attr{
 		{
-			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(body)), AV: body,
+			AT: ipp.ATTR_TYPE_PORT, AL: uint32(len(body)), AV: body,
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
@@ -164,7 +170,7 @@ func (m *Message) ForReq(body []byte, cID uint16) {
 	m.newMessage(ipp.MSG_TYPE_REQ, cID)
 	m.Attr = []Attr{
 		{
-			AT: ipp.ATTR_TYPE_BODY, AL: uint16(len(body)), AV: body,
+			AT: ipp.ATTR_TYPE_BODY, AL: uint32(len(body)), AV: body,
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
