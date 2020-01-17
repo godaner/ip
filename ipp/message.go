@@ -12,10 +12,14 @@ const (
 	MSG_TYPE_REQ = iota
 	// 初始数据交换，如client_wanna_proxy_port；
 	MSG_TYPE_HELLO = iota
-	// proxy和browser的连接建立
+	// 连接建立通知
 	MSG_TYPE_CONN_CREATE = iota
-	// proxy和browser的连接断开
+	// 已收到连接建立通知
+	MSG_TYPE_CONN_CREATE_DONE = iota
+	// 连接断开通知
 	MSG_TYPE_CONN_CLOSE = iota
+	// 已收到连接断开通知
+	MSG_TYPE_CONN_CLOSE_DONE = iota
 )
 
 const (
@@ -37,4 +41,5 @@ type Message interface {
 	ForHelloReq(body []byte, cID uint16)
 	ForConnCreate(body []byte, cID uint16)
 	ForConnClose(body []byte, cID uint16)
+	ForConnCreateDone(body []byte, cID uint16)
 }

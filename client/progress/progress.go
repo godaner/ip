@@ -89,6 +89,7 @@ func (p *Progress) listenProxy() {
 	m.ForHelloReq([]byte(p.Config.ClientWannaProxyPort), 0)
 	_, err = p.ProxyConn.Write(m.Marshall())
 	if err != nil {
+		p.setRestartSignal()
 		log.Printf("Progress#Listen : say hello to proxy err , err : %v !", err)
 	}
 }
@@ -149,28 +150,34 @@ func (p *Progress) fromProxyReqHandler(m ipp.Message) {
 	}
 	// some times the conn create , and proxy send req , but the forward conn is not ok.
 	// we will wait the dial 5s
-	var forwardConn net.Conn
-	c := 0
-	for {
-		if c > 100 {
-			break
-		}
-		if forwardConn != nil {
-			break
-		}
-		v, ok := p.ForwardConnRID.Load(cID)
-		if !ok {
-			continue
-		}
-		forwardConn, _ = v.(net.Conn)
-		if forwardConn == nil {
-			continue
-		}
-		c++
-		time.Sleep(50 * time.Millisecond)
+	//var forwardConn net.Conn
+	//c := 0
+	//for {
+	//	if c > 100 {
+	//		break
+	//	}
+	//	if forwardConn != nil {
+	//		break
+	//	}
+	//	v, ok := p.ForwardConnRID.Load(cID)
+	//	if !ok {
+	//		continue
+	//	}
+	//	forwardConn, _ = v.(net.Conn)
+	//	if forwardConn == nil {
+	//		continue
+	//	}
+	//	c++
+	//	time.Sleep(50 * time.Millisecond)
+	//}
+	v, ok := p.ForwardConnRID.Load(cID)
+	if !ok {
+		log.Printf("Progress#fromProxyHandler : receive proxy req but no forward conn find , not ok , cID is : %v !", cID)
+		return
 	}
+	forwardConn, _ := v.(net.Conn)
 	if forwardConn == nil {
-		log.Printf("Progress#fromProxyHandler : receive proxy req but no forward conn find , cID is : %v !", cID)
+		log.Printf("Progress#fromProxyHandler : receive proxy req but no forward conn find , forwardConnis nil , cID is : %v !", cID)
 		return
 	}
 	n, err := forwardConn.Write(b)
@@ -179,7 +186,17 @@ func (p *Progress) fromProxyReqHandler(m ipp.Message) {
 	}
 	log.Printf("Progress#fromProxyHandler : from proxy to forward , cID is : %v , msg is : %v , len is : %v !", cID, string(b), n)
 }
-
+func (p *Progress) sendCreateConnDoneEvent(cID uint16)(success bool){
+	m := ippnew.NewMessage(p.Config.IPPVersion)
+	m.ForConnCreateDone([]byte{}, cID)
+	_, err := p.ProxyConn.Write(m.Marshall())
+	if err != nil {
+		p.setRestartSignal()
+		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , cID is : %v , err is : %v !", cID, err.Error())
+		return false
+	}
+	return true
+}
 // proxyCreateBrowserConnHandler
 //  处理proxy回复的conn_create信息
 func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
@@ -192,8 +209,10 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 		p.sendForwardConnCloseEvent(cID)
 		return
 	}
+
 	p.ForwardConnRID.Store(cID, forwardConn)
 	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , forward address is : %v !", cID, forwardConn.RemoteAddr())
+	p.sendCreateConnDoneEvent(cID)
 	for {
 		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v !", cID)
 		bs := make([]byte, 1024, 1024)
@@ -227,6 +246,7 @@ func (p *Progress) sendForwardConnCloseEvent(cID uint16) (success bool) {
 	m.ForConnClose([]byte{}, cID)
 	_, err := p.ProxyConn.Write(m.Marshall())
 	if err != nil {
+		p.setRestartSignal()
 		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , cID is : %v , err is : %v !", cID, err.Error())
 		return false
 	}

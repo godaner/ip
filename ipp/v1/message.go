@@ -150,6 +150,9 @@ func (m *Message) UnMarshall(message []byte) {
 	}
 }
 
+func (m *Message) ForConnCreateDone(body []byte, cID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CREATE_DONE, cID)
+}
 func (m *Message) ForConnCreate(body []byte, cID uint16) {
 	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, cID)
 }

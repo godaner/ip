@@ -72,6 +72,9 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 					// receive client hello , we should listen the client_wanna_proxy_port , and dispatch browser data to this client.
 					clientWannaProxyPort := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))
 					go p.clientHelloHandler(clientConn, clientWannaProxyPort)
+				case ipp.MSG_TYPE_CONN_CREATE_DONE:
+					log.Printf("Progress#fromClientConnHandler : receive client conn create done , cID is : %v !", cID)
+					go p.clientConnCreateDoneHandler(clientConn, cID)
 				case ipp.MSG_TYPE_CONN_CLOSE:
 					log.Printf("Progress#fromClientConnHandler : receive client conn close , cID is : %v !", cID)
 					v, ok := p.BrowserConnRID.Load(cID)
@@ -195,35 +198,6 @@ func (p *Progress) clientHelloHandler(clientConn net.Conn, clientWannaProxyPort 
 			continue
 		}
 		log.Printf("Progress#clientHelloHandler : accept a browser conn success , cID is : %v , clientWannaProxyPort is : %v , browser addr is : %v !", cID, clientWannaProxyPort, browserConn.RemoteAddr())
-		go func() {
-			// read browser request
-			for {
-				// build protocol to client
-				bs := make([]byte, 1024, 1024)
-				n, err := browserConn.Read(bs)
-				s := bs[0:n]
-				log.Printf("Progress#clientHelloHandler : accept browser req , cID is : %v , msg is : %v , len is : %v !", cID, string(s), len(s))
-				if err != nil {
-					log.Printf("Progress#clientHelloHandler : read browser data err , cID is : %v , err is : %v !", cID, err.Error())
-					_, ok := p.BrowserConnRID.Load(cID)
-					if ok {
-						p.sendBrowserConnCloseEvent(clientConn, cID)
-						p.BrowserConnRID.Delete(cID)
-					}
-					break
-				}
-				if n <= 0 {
-					continue
-				}
-				m := ippnew.NewMessage(p.Config.IPPVersion)
-				m.ForReq(s, cID)
-				n, err = clientConn.Write(m.Marshall())
-				if err != nil {
-					log.Printf("Progress#clientHelloHandler : send browser data to client err , cID is : %v , err is : %v !", cID, err.Error())
-				}
-				log.Printf("Progress#clientHelloHandler : from proxy to client , cID is : %v , msg is : %v , len is : %v !", cID, string(s), n)
-			}
-		}()
 	}
 }
 
@@ -236,6 +210,53 @@ func (p *Progress) addConn(conn net.Conn, conns []net.Conn) (cs []net.Conn) {
 		cs = append(cs, c)
 	}
 	return cs
+}
+
+func (p *Progress) closeBrowserConn(clientConn net.Conn, cID uint16){
+	_, ok := p.BrowserConnRID.Load(cID)
+	if ok {
+		p.sendBrowserConnCloseEvent(clientConn, cID)
+		p.BrowserConnRID.Delete(cID)
+	}
+	clientConn.Close()
+}
+func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn,cID uint16) {
+	v, ok := p.BrowserConnRID.Load(cID)
+	if !ok {
+		p.closeBrowserConn(clientConn,cID)
+		return
+	}
+	browserConn, _ := v.(net.Conn)
+	if browserConn == nil {
+		p.closeBrowserConn(clientConn,cID)
+		return
+	}
+	// read browser request
+	for {
+		// build protocol to client
+		bs := make([]byte, 1024, 1024)
+		n, err := browserConn.Read(bs)
+		s := bs[0:n]
+		if err != nil {
+			log.Printf("Progress#clientConnCreateDoneHandler : read browser data err , cID is : %v , err is : %v !", cID, err.Error())
+			p.closeBrowserConn(clientConn,cID)
+			return
+		}
+		if n <= 0 {
+			continue
+		}
+		log.Printf("Progress#clientConnCreateDoneHandler : accept browser req , cID is : %v , msg is : %v , len is : %v !", cID, string(s), len(s))
+		m := ippnew.NewMessage(p.Config.IPPVersion)
+		m.ForReq(s, cID)
+		n, err = clientConn.Write(m.Marshall())
+		if err != nil {
+			log.Printf("Progress#clientConnCreateDoneHandler : send browser data to client err , cID is : %v , err is : %v !", cID, err.Error())
+			// maybe client down , we stop the port listener
+			p.closeBrowserConn(clientConn,cID)
+			return
+		}
+		log.Printf("Progress#clientConnCreateDoneHandler : from proxy to client , cID is : %v , msg is : %v , len is : %v !", cID, string(s), n)
+	}
 }
 
 //产生随机序列号
