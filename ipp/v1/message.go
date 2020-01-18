@@ -105,12 +105,7 @@ func (m *Message) Marshall() []byte {
 			log.Printf("Message#Bytes : binary.Write m.Header.AttrStr err , err is : %v !", err.Error())
 		}
 	}
-	body := buf.Bytes()
-	// be careful !!
-	ippLen := make([]byte, 4, 4)
-	binary.BigEndian.PutUint32(ippLen, uint32(len(body)))
-	body = append(ippLen, body...)
-	return body
+	return buf.Bytes()
 }
 
 func (m *Message) UnMarshall(message []byte) {

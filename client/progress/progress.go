@@ -87,7 +87,12 @@ func (p *Progress) listenProxy() {
 	// say hello to proxy
 	m := ippnew.NewMessage(p.Config.IPPVersion)
 	m.ForHelloReq([]byte(p.Config.ClientWannaProxyPort), 0)
-	_, err = p.ProxyConn.Write(m.Marshall())
+	// marshal
+	b:=m.Marshall()
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+	b = append(ippLen, b...)
+	_, err = p.ProxyConn.Write(b)
 	if err != nil {
 		p.setRestartSignal()
 		log.Printf("Progress#Listen : say hello to proxy err , err : %v !", err)
@@ -111,9 +116,9 @@ func (p *Progress) fromProxyHandler() {
 		}
 		s := bs[0:n]
 		log.Printf("Progress#fromProxyHandler : receive proxy msg , msg is : %v , len is : %v !", string(s), n)
-		if n <= 0 {
-			continue
-		}
+		//if n <= 0 {
+		//	continue
+		//}
 		m := ippnew.NewMessage(p.Config.IPPVersion)
 		m.UnMarshall(s)
 		cID := m.CID()
@@ -145,9 +150,9 @@ func (p *Progress) fromProxyReqHandler(m ipp.Message) {
 	cID := m.CID()
 	b := m.AttributeByType(ipp.ATTR_TYPE_BODY)
 	log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v , body is : %v , len is : %v !", cID, string(b), len(b))
-	if len(b) <= 0 {
-		return
-	}
+	//if len(b) <= 0 {
+	//	return
+	//}
 	// some times the conn create , and proxy send req , but the forward conn is not ok.
 	// we will wait the dial 5s
 	//var forwardConn net.Conn
@@ -189,7 +194,12 @@ func (p *Progress) fromProxyReqHandler(m ipp.Message) {
 func (p *Progress) sendCreateConnDoneEvent(cID uint16)(success bool){
 	m := ippnew.NewMessage(p.Config.IPPVersion)
 	m.ForConnCreateDone([]byte{}, cID)
-	_, err := p.ProxyConn.Write(m.Marshall())
+	//marshal
+	b:=m.Marshall()
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+	b = append(ippLen, b...)
+	_, err := p.ProxyConn.Write(b)
 	if err != nil {
 		p.setRestartSignal()
 		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , cID is : %v , err is : %v !", cID, err.Error())
@@ -211,11 +221,11 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 	}
 
 	p.ForwardConnRID.Store(cID, forwardConn)
-	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , forward address is : %v !", cID, forwardConn.RemoteAddr())
+	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , forward local address is : %v !", cID, forwardConn.LocalAddr())
 	p.sendCreateConnDoneEvent(cID)
 	for {
 		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v !", cID)
-		bs := make([]byte, 1024, 1024)
+		bs := make([]byte, 10240, 10240)
 		n, err := forwardConn.Read(bs)
 		if err != nil {
 			log.Printf("Progress#proxyCreateBrowserConnHandler : read forward data err , cID is : %v , err is : %v !", cID, err)
@@ -228,12 +238,17 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 			return
 		}
 		log.Printf("Progress#proxyCreateBrowserConnHandler : receive forward msg , cID is : %v , msg is : %v , len is : %v !", cID, string(bs[0:n]), n)
-		if n <= 0 {
-			return
-		}
+		//if n <= 0 {
+		//	return
+		//}
 		m := ippnew.NewMessage(p.Config.IPPVersion)
 		m.ForReq(bs[0:n], cID)
-		_, err = p.ProxyConn.Write(m.Marshall())
+		//marshal
+		b:=m.Marshall()
+		ippLen := make([]byte, 4, 4)
+		binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+		b = append(ippLen, b...)
+		_, err = p.ProxyConn.Write(b)
 		if err != nil {
 			log.Printf("Progress#proxyCreateBrowserConnHandler : write forward's data to proxy err , cID is : %v , err is : %v !", cID, err.Error())
 			p.setRestartSignal()
@@ -244,7 +259,12 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
 func (p *Progress) sendForwardConnCloseEvent(cID uint16) (success bool) {
 	m := ippnew.NewMessage(p.Config.IPPVersion)
 	m.ForConnClose([]byte{}, cID)
-	_, err := p.ProxyConn.Write(m.Marshall())
+	//marshal
+	b:=m.Marshall()
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+	b = append(ippLen, b...)
+	_, err := p.ProxyConn.Write(b)
 	if err != nil {
 		p.setRestartSignal()
 		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , cID is : %v , err is : %v !", cID, err.Error())

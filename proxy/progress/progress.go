@@ -60,7 +60,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
-					clientConn.Close()
+					//clientConn.Close()
 					break
 				}
 				m := ippnew.NewMessage(p.Config.IPPVersion)
@@ -102,9 +102,9 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 						continue
 					}
 					data := m.AttributeByType(ipp.ATTR_TYPE_BODY)
-					if len(data) <= 0 {
-						return
-					}
+					//if len(data) <= 0 {
+					//	return
+					//}
 					_, err := browserConn.Write(data)
 					if err != nil {
 						log.Printf("Progress#fromClientConnHandler : from client to browser err , cID is : %v , err is : %v !", cID, err.Error())
@@ -144,7 +144,12 @@ func (p *Progress) ListenClientWannaProxyPort(clientWannaProxyPort string) (l ne
 func (p *Progress) sendBrowserConnCreateEvent(clientConn, browserConn net.Conn, cID uint16) (success bool) {
 	m := ippnew.NewMessage(p.Config.IPPVersion)
 	m.ForConnCreate([]byte{}, cID)
-	_, err := clientConn.Write(m.Marshall())
+	//marshal
+	b:=m.Marshall()
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+	b = append(ippLen, b...)
+	_, err := clientConn.Write(b)
 	if err != nil {
 		log.Printf("Progress#sendBrowserConnCreateEvent : notify client conn create err , cID is : %v , err is : %v !", cID, err.Error())
 		err = browserConn.Close()
@@ -158,7 +163,12 @@ func (p *Progress) sendBrowserConnCreateEvent(clientConn, browserConn net.Conn, 
 func (p *Progress) sendBrowserConnCloseEvent(clientConn net.Conn, cID uint16) (success bool) {
 	m := ippnew.NewMessage(p.Config.IPPVersion)
 	m.ForConnClose([]byte{}, cID)
-	_, err := clientConn.Write(m.Marshall())
+	//marshal
+	b:=m.Marshall()
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+	b = append(ippLen, b...)
+	_, err := clientConn.Write(b)
 	if err != nil {
 		log.Printf("Progress#sendBrowserConnCloseEvent : notify client conn close err , cID is : %v , err is : %v !", cID, err.Error())
 		return false
@@ -172,7 +182,12 @@ func (p *Progress) clientHelloHandler(clientConn net.Conn, clientWannaProxyPort 
 	// return server hello
 	m := ippnew.NewMessage(p.Config.IPPVersion)
 	m.ForHelloReq([]byte{}, 0)
-	_, err := clientConn.Write(m.Marshall())
+	//marshal
+	b:=m.Marshall()
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+	b = append(ippLen, b...)
+	_, err := clientConn.Write(b)
 	if err != nil {
 		log.Printf("Progress#clientHelloHandler : return server hello err , err is : %v !", err.Error())
 	}
@@ -218,7 +233,7 @@ func (p *Progress) closeBrowserConn(clientConn net.Conn, cID uint16){
 		p.sendBrowserConnCloseEvent(clientConn, cID)
 		p.BrowserConnRID.Delete(cID)
 	}
-	clientConn.Close()
+	//clientConn.Close()
 }
 func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn,cID uint16) {
 	v, ok := p.BrowserConnRID.Load(cID)
@@ -234,7 +249,7 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn,cID uint16) {
 	// read browser request
 	for {
 		// build protocol to client
-		bs := make([]byte, 1024, 1024)
+		bs := make([]byte, 10240, 10240)
 		n, err := browserConn.Read(bs)
 		s := bs[0:n]
 		if err != nil {
@@ -242,13 +257,18 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn,cID uint16) {
 			p.closeBrowserConn(clientConn,cID)
 			return
 		}
-		if n <= 0 {
-			continue
-		}
+		//if n <= 0 {
+		//	continue
+		//}
 		log.Printf("Progress#clientConnCreateDoneHandler : accept browser req , cID is : %v , msg is : %v , len is : %v !", cID, string(s), len(s))
 		m := ippnew.NewMessage(p.Config.IPPVersion)
 		m.ForReq(s, cID)
-		n, err = clientConn.Write(m.Marshall())
+		//marshal
+		b:=m.Marshall()
+		ippLen := make([]byte, 4, 4)
+		binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+		b = append(ippLen, b...)
+		n, err = clientConn.Write(b)
 		if err != nil {
 			log.Printf("Progress#clientConnCreateDoneHandler : send browser data to client err , cID is : %v , err is : %v !", cID, err.Error())
 			// maybe client down , we stop the port listener
