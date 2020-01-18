@@ -216,16 +216,6 @@ func (p *Progress) clientHelloHandler(clientConn net.Conn, clientWannaProxyPort 
 	}
 }
 
-func (p *Progress) addConn(conn net.Conn, conns []net.Conn) (cs []net.Conn) {
-	cs = []net.Conn{conn}
-	for _, c := range conns {
-		if conn.RemoteAddr() == c.RemoteAddr() {
-			continue
-		}
-		cs = append(cs, c)
-	}
-	return cs
-}
 
 func (p *Progress) closeBrowserConn(clientConn net.Conn, cID uint16){
 	_, ok := p.BrowserConnRID.Load(cID)
@@ -233,7 +223,6 @@ func (p *Progress) closeBrowserConn(clientConn net.Conn, cID uint16){
 		p.sendBrowserConnCloseEvent(clientConn, cID)
 		p.BrowserConnRID.Delete(cID)
 	}
-	//clientConn.Close()
 }
 func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn,cID uint16) {
 	v, ok := p.BrowserConnRID.Load(cID)
