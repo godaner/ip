@@ -231,7 +231,7 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID, sID uint16) {
 	p.ForwardConnRID.Store(cID, forwardConn)
 	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , sID is : %v , forward local address is : %v !", cID, sID, forwardConn.LocalAddr())
 	p.sendCreateConnDoneEvent(cID, sID)
-	bs := make([]byte, 1024, 1024)
+	bs := make([]byte, 4096, 4096)
 	for {
 		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v , sID is : %v !", cID, sID)
 		sID = p.newSerialNo()
@@ -263,6 +263,8 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID, sID uint16) {
 			p.setRestartSignal()
 			return
 		}
+		log.Printf("Progress#proxyCreateBrowserConnHandler : from client to proxy msg , cID is : %v , sID is : %v , msg is : %v , len is : %v !", cID, sID, string(b), len(b))
+
 	}
 }
 func (p *Progress) sendForwardConnCloseEvent(cID, sID uint16) (success bool) {
@@ -301,7 +303,6 @@ func (p *Progress) proxyCloseBrowserConnHandler(cID, sID uint16) {
 
 //产生随机序列号
 func (p *Progress) newSerialNo() uint16 {
-	time.Sleep(10 * time.Millisecond)
 	rand.Seed(time.Now().UnixNano())
 	r := rand.Intn(math.MaxUint16)
 	return uint16(r)

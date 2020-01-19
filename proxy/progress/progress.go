@@ -5,6 +5,7 @@ import (
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
 	"github.com/godaner/ip/proxy/config"
+	"io"
 	"log"
 	"math"
 	"math/rand"
@@ -53,7 +54,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 			for {
 				// parse protocol
 				length := make([]byte, 4, 4)
-				n, err := clientConn.Read(length)
+				n, err := io.ReadFull(clientConn,length)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read ipp len info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
@@ -63,7 +64,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 				ippLength := binary.BigEndian.Uint32(length)
 				log.Printf("Progress#fromClientConnHandler : read info from client ippLength is : %v !", ippLength)
 				bs := make([]byte, ippLength, ippLength)
-				n, err = clientConn.Read(bs)
+				n, err = io.ReadFull(clientConn,bs)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
@@ -237,7 +238,7 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 		return
 	}
 	// read browser request
-	bs := make([]byte, 1024, 1024)
+	bs := make([]byte, 4096, 4096)
 	for {
 		// build protocol to client
 		sID := p.newSerialNo()
@@ -266,7 +267,7 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 			p.closeBrowserConn(clientConn, cID, sID)
 			return
 		}
-		log.Printf("Progress#clientConnCreateDoneHandler : from proxy to client , cID is : %v , sID is : %v , msg is : %v , len is : %v !", cID, sID, string(s), n)
+		log.Printf("Progress#clientConnCreateDoneHandler : from proxy to client , cID is : %v , sID is : %v , msg is : %v , len is : %v !", cID, sID, string(b), len(b))
 	}
 }
 
@@ -285,7 +286,6 @@ func (p *Progress) closeBrowserConn(clientConn net.Conn, cID, sID uint16) {
 
 //产生随机序列号
 func (p *Progress) newSerialNo() uint16 {
-	time.Sleep(100 * time.Millisecond)
 	rand.Seed(time.Now().UnixNano())
 	r := rand.Intn(math.MaxUint16)
 	return uint16(r)

@@ -35,7 +35,7 @@ func (h *Header) AttrNum() byte {
 // Attr
 type Attr struct {
 	AT byte
-	AL uint32
+	AL uint16
 	AV []byte
 }
 
@@ -43,7 +43,7 @@ func (a *Attr) T() byte {
 	return a.AT
 }
 
-func (a *Attr) L() uint32 {
+func (a *Attr) L() uint16 {
 	return a.AL
 }
 
@@ -104,7 +104,8 @@ func (m *Message) Marshall() []byte {
 		if err != nil {
 			log.Printf("Message#Bytes : binary.Write m.Header.AttrType err , err is : %v !", err.Error())
 		}
-		err = binary.Write(buf, binary.BigEndian, v.AL+2)
+		//be careful
+		err = binary.Write(buf, binary.BigEndian, v.AL+3)
 		if err != nil {
 			log.Printf("Message#Bytes : binary.Write m.Header.AttrLen err , err is : %v !", err.Error())
 		}
@@ -146,8 +147,8 @@ func (m *Message) UnMarshall(message []byte) {
 		if err != nil {
 			log.Printf("Message#UnMarshall : binary.Read 1 err , err is : %v !", err.Error())
 		}
-		attr.AL -= 2
-		attr.AV = make([]byte, attr.L())
+		attr.AL -= 3 //be careful
+		attr.AV = make([]byte, attr.AL)
 		if err := binary.Read(buf, binary.BigEndian, &attr.AV); err != nil {
 			log.Printf("Message#UnMarshall : binary.Read 2 err , err is : %v !", err.Error())
 		}
@@ -170,7 +171,7 @@ func (m *Message) ForHelloReq(body []byte, cID, sID uint16) {
 	m.newMessage(ipp.MSG_TYPE_HELLO, cID, sID)
 	m.Attr = []Attr{
 		{
-			AT: ipp.ATTR_TYPE_PORT, AL: uint32(len(body)), AV: body,
+			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(body)), AV: body,
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
@@ -179,7 +180,7 @@ func (m *Message) ForReq(body []byte, cID, sID uint16) {
 	m.newMessage(ipp.MSG_TYPE_REQ, cID, sID)
 	m.Attr = []Attr{
 		{
-			AT: ipp.ATTR_TYPE_BODY, AL: uint32(len(body)), AV: body,
+			AT: ipp.ATTR_TYPE_BODY, AL: uint16(len(body)), AV: body,
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))

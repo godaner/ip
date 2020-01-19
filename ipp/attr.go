@@ -1,6 +1,6 @@
 package ipp
 type Attr interface {
 	T() byte
-	L() uint32
+	L() uint16
 	V() []byte
 }
