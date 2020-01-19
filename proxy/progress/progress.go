@@ -54,7 +54,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 			for {
 				// parse protocol
 				length := make([]byte, 4, 4)
-				n, err := io.ReadFull(clientConn,length)
+				n, err := io.ReadFull(clientConn, length)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read ipp len info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
@@ -64,7 +64,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 				ippLength := binary.BigEndian.Uint32(length)
 				log.Printf("Progress#fromClientConnHandler : read info from client ippLength is : %v !", ippLength)
 				bs := make([]byte, ippLength, ippLength)
-				n, err = io.ReadFull(clientConn,bs)
+				n, err = io.ReadFull(clientConn, bs)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
@@ -114,7 +114,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 					//if len(data) <= 0 {
 					//	return
 					//}
-					_, err := browserConn.Write(data)
+					n, err := browserConn.Write(data)
 					if err != nil {
 						log.Printf("Progress#fromClientConnHandler : from client to browser err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err.Error())
 						_, ok := p.BrowserConnRID.Load(cID)
@@ -124,7 +124,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 						}
 
 					}
-					log.Printf("Progress#fromClientConnHandler : from client to browser success , cID is : %v , sID is : %v , data is : %v , data len is : %v !", cID, sID, string(data), len(data))
+					log.Printf("Progress#fromClientConnHandler : from client to browser success , cID is : %v , sID is : %v , data len is : %v !", cID, sID, n)
 				}
 			}
 		}()
@@ -252,7 +252,7 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 		//if n <= 0 {
 		//	continue
 		//}
-		log.Printf("Progress#clientConnCreateDoneHandler : accept browser req , cID is : %v , sID is : %v , msg is : %v , len is : %v !", cID, sID, string(s), len(s))
+		log.Printf("Progress#clientConnCreateDoneHandler : accept browser req , cID is : %v , sID is : %v , len is : %v !", cID, sID, n)
 		m := ippnew.NewMessage(p.Config.IPPVersion)
 		m.ForReq(s, cID, sID)
 		//marshal
@@ -267,7 +267,7 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 			p.closeBrowserConn(clientConn, cID, sID)
 			return
 		}
-		log.Printf("Progress#clientConnCreateDoneHandler : from proxy to client , cID is : %v , sID is : %v , msg is : %v , len is : %v !", cID, sID, string(b), len(b))
+		log.Printf("Progress#clientConnCreateDoneHandler : from proxy to client , cID is : %v , sID is : %v , len is : %v !", cID, sID, n)
 	}
 }
 
@@ -277,8 +277,8 @@ func (p *Progress) closeBrowserConn(clientConn net.Conn, cID, sID uint16) {
 		browserConn, _ := v.(net.Conn)
 		p.sendBrowserConnCloseEvent(clientConn, cID, sID)
 		p.BrowserConnRID.Delete(cID)
-		err:=browserConn.Close()
-		if err!=nil{
+		err := browserConn.Close()
+		if err != nil {
 			log.Printf("Progress#closeBrowserConn : close closeBrowserConn err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err)
 		}
 	}
