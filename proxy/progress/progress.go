@@ -207,6 +207,7 @@ func (p *Progress) clientHelloHandler(clientConn net.Conn, clientWannaProxyPort 
 	}
 	log.Printf("Progress#clientHelloHandler : listen browser port is : %v !", clientWannaProxyPort)
 	for {
+
 		browserConn, err := l.Accept()
 		if err != nil {
 			log.Printf("Progress#clientHelloHandler : accept browser conn err , err is : %v !", err.Error())
@@ -270,12 +271,18 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 }
 
 func (p *Progress) closeBrowserConn(clientConn net.Conn, cID, sID uint16) {
-	_, ok := p.BrowserConnRID.Load(cID)
+	v, ok := p.BrowserConnRID.Load(cID)
 	if ok {
+		browserConn, _ := v.(net.Conn)
 		p.sendBrowserConnCloseEvent(clientConn, cID, sID)
 		p.BrowserConnRID.Delete(cID)
+		err:=browserConn.Close()
+		if err!=nil{
+			log.Printf("Progress#closeBrowserConn : close closeBrowserConn err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err)
+		}
 	}
 }
+
 //产生随机序列号
 func (p *Progress) newSerialNo() uint16 {
 	time.Sleep(100 * time.Millisecond)
