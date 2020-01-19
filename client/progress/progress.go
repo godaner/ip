@@ -66,7 +66,7 @@ func (p *Progress) listenProxy() {
 			addr = forwardConn.RemoteAddr().String()
 			forwardConn.Close()
 		}
-		log.Printf("Progress#listenProxy : re listen proxy , we need close the forward conn , cID is : %v , currt forward addr is : %v ! ", key, addr)
+		log.Printf("Progress#listenProxy : re listen proxy , we need close the forward conn , cID is : %v , sID is : %v , currt forward addr is : %v ! ", key, addr)
 		return true
 	})
 	p.ForwardConnRID = sync.Map{} //map[uint16]net.Conn{}
@@ -86,9 +86,9 @@ func (p *Progress) listenProxy() {
 	}()
 	// say hello to proxy
 	m := ippnew.NewMessage(p.Config.IPPVersion)
-	m.ForHelloReq([]byte(p.Config.ClientWannaProxyPort), 0)
+	m.ForHelloReq([]byte(p.Config.ClientWannaProxyPort), 0, p.newSerialNo())
 	// marshal
-	b:=m.Marshall()
+	b := m.Marshall()
 	ippLen := make([]byte, 4, 4)
 	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
 	b = append(ippLen, b...)
@@ -104,11 +104,17 @@ func (p *Progress) listenProxy() {
 func (p *Progress) fromProxyHandler() {
 	for {
 		// parse protocol
+		sID := p.newSerialNo()
 		length := make([]byte, 4, 4)
-		n, _ := p.ProxyConn.Read(length)
+		n, err := p.ProxyConn.Read(length)
+		if err != nil {
+			log.Printf("Progress#fromClientConnHandler : receive proxy ipp len err , err is : %v !", err)
+			p.setRestartSignal()
+			return
+		}
 		ippLength := binary.BigEndian.Uint32(length)
 		bs := make([]byte, ippLength, ippLength)
-		n, err := p.ProxyConn.Read(bs)
+		n, err = p.ProxyConn.Read(bs)
 		if err != nil {
 			log.Printf("Progress#fromClientConnHandler : receive proxy err , err is : %v !", err)
 			p.setRestartSignal()
@@ -124,17 +130,17 @@ func (p *Progress) fromProxyHandler() {
 		cID := m.CID()
 		switch m.Type() {
 		case ipp.MSG_TYPE_HELLO:
-			log.Printf("Progress#fromClientConnHandler : receive proxy hello , cID is : %v !", cID)
+			log.Printf("Progress#fromClientConnHandler : receive proxy hello , cID is : %v , sID is : %v !", cID, sID)
 		case ipp.MSG_TYPE_CONN_CREATE:
-			log.Printf("Progress#fromClientConnHandler : receive proxy conn create , cID is : %v !", cID)
-			go p.proxyCreateBrowserConnHandler(cID)
+			log.Printf("Progress#fromClientConnHandler : receive proxy conn create , cID is : %v , sID is : %v !", cID, sID)
+			go p.proxyCreateBrowserConnHandler(cID, sID)
 		case ipp.MSG_TYPE_CONN_CLOSE:
-			log.Printf("Progress#fromClientConnHandler : receive proxy conn close , cID is : %v !", cID)
+			log.Printf("Progress#fromClientConnHandler : receive proxy conn close , cID is : %v , sID is : %v !", cID, sID)
 			go func() {
-				p.proxyCloseBrowserConnHandler(cID)
+				p.proxyCloseBrowserConnHandler(cID, sID)
 			}()
 		case ipp.MSG_TYPE_REQ:
-			log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v !", cID)
+			log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v , sID is : %v !", cID, sID)
 			// receive proxy req info , we should dispatch the info
 			go p.fromProxyReqHandler(m)
 
@@ -148,8 +154,9 @@ func (p *Progress) fromProxyHandler() {
 // fromProxyReqHandler
 func (p *Progress) fromProxyReqHandler(m ipp.Message) {
 	cID := m.CID()
+	sID := m.SerialId()
 	b := m.AttributeByType(ipp.ATTR_TYPE_BODY)
-	log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v , body is : %v , len is : %v !", cID, string(b), len(b))
+	log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v , sID is : %v , body is : %v , len is : %v !", cID, sID, string(b), len(b))
 	//if len(b) <= 0 {
 	//	return
 	//}
@@ -177,104 +184,106 @@ func (p *Progress) fromProxyReqHandler(m ipp.Message) {
 	//}
 	v, ok := p.ForwardConnRID.Load(cID)
 	if !ok {
-		log.Printf("Progress#fromProxyHandler : receive proxy req but no forward conn find , not ok , cID is : %v !", cID)
+		log.Printf("Progress#fromProxyHandler : receive proxy req but no forward conn find , not ok , cID is : %v , sID is : %v !", cID, sID)
 		return
 	}
 	forwardConn, _ := v.(net.Conn)
 	if forwardConn == nil {
-		log.Printf("Progress#fromProxyHandler : receive proxy req but no forward conn find , forwardConnis nil , cID is : %v !", cID)
+		log.Printf("Progress#fromProxyHandler : receive proxy req but no forward conn find , forwardConnis nil , cID is : %v , sID is : %v !", cID, sID)
 		return
 	}
 	n, err := forwardConn.Write(b)
 	if err != nil {
-		log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v , forward err , err : %v !", cID, err)
+		log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v , sID is : %v , forward err , err : %v !", cID, sID, err)
 	}
-	log.Printf("Progress#fromProxyHandler : from proxy to forward , cID is : %v , msg is : %v , len is : %v !", cID, string(b), n)
+	log.Printf("Progress#fromProxyHandler : from proxy to forward , cID is : %v , sID is : %v , msg is : %v , len is : %v !", cID, sID, string(b), n)
 }
-func (p *Progress) sendCreateConnDoneEvent(cID uint16)(success bool){
+func (p *Progress) sendCreateConnDoneEvent(cID, sID uint16) (success bool) {
 	m := ippnew.NewMessage(p.Config.IPPVersion)
-	m.ForConnCreateDone([]byte{}, cID)
+	m.ForConnCreateDone([]byte{}, cID, sID)
 	//marshal
-	b:=m.Marshall()
+	b := m.Marshall()
 	ippLen := make([]byte, 4, 4)
 	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
 	b = append(ippLen, b...)
 	_, err := p.ProxyConn.Write(b)
 	if err != nil {
 		p.setRestartSignal()
-		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , cID is : %v , err is : %v !", cID, err.Error())
+		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err.Error())
 		return false
 	}
 	return true
 }
+
 // proxyCreateBrowserConnHandler
 //  处理proxy回复的conn_create信息
-func (p *Progress) proxyCreateBrowserConnHandler(cID uint16) {
+func (p *Progress) proxyCreateBrowserConnHandler(cID, sID uint16) {
 	// proxy return browser conn create , we should dial forward addr
 	addr := p.Config.ClientForwardAddr
 	forwardConn, err := net.Dial("tcp", addr)
 	if err != nil {
 		// if dial fail , tell proxy to close browser conn
-		log.Printf("Progress#proxyCreateBrowserConnHandler : after get proxy browser conn create , dial forward err , cID is : %v , err is : %v !", cID, err)
-		p.sendForwardConnCloseEvent(cID)
+		log.Printf("Progress#proxyCreateBrowserConnHandler : after get proxy browser conn create , dial forward err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err)
+		p.sendForwardConnCloseEvent(cID, sID)
 		return
 	}
 
 	p.ForwardConnRID.Store(cID, forwardConn)
-	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , forward local address is : %v !", cID, forwardConn.LocalAddr())
-	p.sendCreateConnDoneEvent(cID)
+	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , sID is : %v , forward local address is : %v !", cID, sID, forwardConn.LocalAddr())
+	p.sendCreateConnDoneEvent(cID, sID)
+	bs := make([]byte, 1024, 1024)
 	for {
-		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v !", cID)
-		bs := make([]byte, 10240, 10240)
+		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v , sID is : %v !", cID, sID)
+		sID = p.newSerialNo()
 		n, err := forwardConn.Read(bs)
 		if err != nil {
-			log.Printf("Progress#proxyCreateBrowserConnHandler : read forward data err , cID is : %v , err is : %v !", cID, err)
+			log.Printf("Progress#proxyCreateBrowserConnHandler : read forward data err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err)
 			// lost connection , notify proxy
 			_, ok := p.ForwardConnRID.Load(cID)
 			if ok {
 				p.ForwardConnRID.Delete(cID)
-				p.sendForwardConnCloseEvent(cID)
+				p.sendForwardConnCloseEvent(cID, sID)
 			}
 			return
 		}
-		log.Printf("Progress#proxyCreateBrowserConnHandler : receive forward msg , cID is : %v , msg is : %v , len is : %v !", cID, string(bs[0:n]), n)
+		log.Printf("Progress#proxyCreateBrowserConnHandler : receive forward msg , cID is : %v , sID is : %v , msg is : %v , len is : %v !", cID, sID, string(bs[0:n]), n)
 		//if n <= 0 {
 		//	return
 		//}
 		m := ippnew.NewMessage(p.Config.IPPVersion)
-		m.ForReq(bs[0:n], cID)
+		m.ForReq(bs[0:n], cID, sID)
 		//marshal
-		b:=m.Marshall()
+		b := m.Marshall()
 		ippLen := make([]byte, 4, 4)
 		binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
 		b = append(ippLen, b...)
 		_, err = p.ProxyConn.Write(b)
 		if err != nil {
-			log.Printf("Progress#proxyCreateBrowserConnHandler : write forward's data to proxy err , cID is : %v , err is : %v !", cID, err.Error())
+			log.Printf("Progress#proxyCreateBrowserConnHandler : write forward's data to proxy err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err.Error())
 			p.setRestartSignal()
 			return
 		}
 	}
 }
-func (p *Progress) sendForwardConnCloseEvent(cID uint16) (success bool) {
+func (p *Progress) sendForwardConnCloseEvent(cID, sID uint16) (success bool) {
 	m := ippnew.NewMessage(p.Config.IPPVersion)
-	m.ForConnClose([]byte{}, cID)
+	m.ForConnClose([]byte{}, cID, sID)
 	//marshal
-	b:=m.Marshall()
+	b := m.Marshall()
 	ippLen := make([]byte, 4, 4)
 	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
 	b = append(ippLen, b...)
 	_, err := p.ProxyConn.Write(b)
 	if err != nil {
 		p.setRestartSignal()
-		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , cID is : %v , err is : %v !", cID, err.Error())
+		log.Printf("Progress#sendForwardConnCloseEvent : notify proxy conn close err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err.Error())
 		return false
 	}
 	return true
 }
 
 // proxyCloseBrowserConnHandler
-func (p *Progress) proxyCloseBrowserConnHandler(cID uint16) {
+func (p *Progress) proxyCloseBrowserConnHandler(cID, sID uint16) {
 	v, ok := p.ForwardConnRID.Load(cID)
 	if !ok {
 		return
@@ -286,12 +295,13 @@ func (p *Progress) proxyCloseBrowserConnHandler(cID uint16) {
 	p.ForwardConnRID.Delete(cID)
 	err := c.Close()
 	if err != nil {
-		log.Printf("Progress#proxyCloseBrowserConnHandler : close forward conn err , cID is : %v , err : %v !", cID, err.Error())
+		log.Printf("Progress#proxyCloseBrowserConnHandler : close forward conn err , cID is : %v , sID is : %v , err : %v !", cID, sID, err.Error())
 	}
 }
 
 //产生随机序列号
 func (p *Progress) newSerialNo() uint16 {
+	time.Sleep(10 * time.Millisecond)
 	rand.Seed(time.Now().UnixNano())
 	r := rand.Intn(math.MaxUint16)
 	return uint16(r)

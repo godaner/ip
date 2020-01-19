@@ -35,11 +35,12 @@ type Message interface {
 	Marshall() []byte
 	Type() byte
 	CID() uint16
+	SerialId() uint16
 	Attribute(int) Attr
 	AttributeByType(byte) []byte
-	ForReq(body []byte, cID uint16)
-	ForHelloReq(body []byte, cID uint16)
-	ForConnCreate(body []byte, cID uint16)
-	ForConnClose(body []byte, cID uint16)
-	ForConnCreateDone(body []byte, cID uint16)
+	ForReq(body []byte, cID, sID uint16)
+	ForHelloReq(body []byte, cID, sID uint16)
+	ForConnCreate(body []byte, cID, sID uint16)
+	ForConnClose(body []byte, cID, sID uint16)
+	ForConnCreateDone(body []byte, cID, sID uint16)
 }

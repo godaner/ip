@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"encoding/binary"
 	"fmt"
 	. "github.com/smartystreets/goconvey/convey"
 	"net"
@@ -9,7 +10,11 @@ import (
 )
 
 func TestVersion_NewReq(t *testing.T) {
-
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(1025))
+	ippLength := binary.BigEndian.Uint32(ippLen)
+	fmt.Println("ippLength",ippLength)
+	fmt.Println(ippLength)
 	Convey("New Req and UnMarshall !", t, func(cc C) {
 		testBody := []byte("my love")
 		t.Logf("origin is : %v !",testBody)

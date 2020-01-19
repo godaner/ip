@@ -9,10 +9,11 @@ import (
 
 // Header
 type Header struct {
-	HVersion byte
-	HType    byte
-	HCID     uint16
-	HAttrNum byte
+	HVersion  byte
+	HType     byte
+	HSerialNo uint16
+	HCID      uint16
+	HAttrNum  byte
 }
 
 func (h *Header) Version() byte {
@@ -57,6 +58,9 @@ type Message struct {
 	AttrMaps map[byte][]byte
 }
 
+func (m *Message) SerialId() uint16 {
+	return m.Header.HSerialNo
+}
 
 func (m *Message) AttributeByType(t byte) []byte {
 	return m.AttrMaps[t]
@@ -82,6 +86,10 @@ func (m *Message) Marshall() []byte {
 	err = binary.Write(buf, binary.BigEndian, m.Header.HType)
 	if err != nil {
 		log.Printf("Message#Bytes : binary.Write m.Header.Type err , err is : %v !", err.Error())
+	}
+	err = binary.Write(buf, binary.BigEndian, m.Header.HSerialNo)
+	if err != nil {
+		log.Printf("Message#Bytes : binary.Write m.Header.SerialNo err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HCID)
 	if err != nil {
@@ -116,6 +124,9 @@ func (m *Message) UnMarshall(message []byte) {
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HType); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HType err , err is : %v !", err.Error())
 	}
+	if err := binary.Read(buf, binary.BigEndian, &m.Header.HSerialNo); err != nil {
+		log.Printf("Message#UnMarshall : binary.Readm.Header.HSerialNo err , err is : %v !", err.Error())
+	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HCID); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HCID err , err is : %v !", err.Error())
 	}
@@ -145,18 +156,18 @@ func (m *Message) UnMarshall(message []byte) {
 	}
 }
 
-func (m *Message) ForConnCreateDone(body []byte, cID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CREATE_DONE, cID)
+func (m *Message) ForConnCreateDone(body []byte, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CREATE_DONE, cID, sID)
 }
-func (m *Message) ForConnCreate(body []byte, cID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, cID)
+func (m *Message) ForConnCreate(body []byte, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, cID, sID)
 }
 
-func (m *Message) ForConnClose(body []byte, cID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CLOSE, cID)
+func (m *Message) ForConnClose(body []byte, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CLOSE, cID, sID)
 }
-func (m *Message) ForHelloReq(body []byte, cID uint16) {
-	m.newMessage(ipp.MSG_TYPE_HELLO, cID)
+func (m *Message) ForHelloReq(body []byte, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_HELLO, cID, sID)
 	m.Attr = []Attr{
 		{
 			AT: ipp.ATTR_TYPE_PORT, AL: uint32(len(body)), AV: body,
@@ -164,8 +175,8 @@ func (m *Message) ForHelloReq(body []byte, cID uint16) {
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
-func (m *Message) ForReq(body []byte, cID uint16) {
-	m.newMessage(ipp.MSG_TYPE_REQ, cID)
+func (m *Message) ForReq(body []byte, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_REQ, cID, sID)
 	m.Attr = []Attr{
 		{
 			AT: ipp.ATTR_TYPE_BODY, AL: uint32(len(body)), AV: body,
@@ -174,10 +185,11 @@ func (m *Message) ForReq(body []byte, cID uint16) {
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
 
-func (m *Message) newMessage(typ byte, cID uint16) {
+func (m *Message) newMessage(typ byte, cID, sID uint16) {
 	header := Header{}
 	header.HVersion = ipp.VERSION_V1
 	header.HType = typ
+	header.HSerialNo = sID
 	header.HCID = cID
 	m.Header = header
 }
