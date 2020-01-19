@@ -5,7 +5,6 @@ import (
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
 	"github.com/godaner/ip/proxy/config"
-	"io"
 	"log"
 	"math"
 	"math/rand"
@@ -54,7 +53,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 			for {
 				// parse protocol
 				length := make([]byte, 4, 4)
-				n, err := io.ReadFull(clientConn, length)
+				n, err := clientConn.Read(length)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read ipp len info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
@@ -64,7 +63,7 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 				ippLength := binary.BigEndian.Uint32(length)
 				log.Printf("Progress#fromClientConnHandler : read info from client ippLength is : %v !", ippLength)
 				bs := make([]byte, ippLength, ippLength)
-				n, err = io.ReadFull(clientConn, bs)
+				n, err = clientConn.Read(bs)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
@@ -238,8 +237,9 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 		return
 	}
 	// read browser request
-	bs := make([]byte, 4096, 4096)
+	bs := make([]byte, 1024, 1024)
 	for {
+		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive browser msg , cID is : %v , sID is : %v !", cID, sID)
 		// build protocol to client
 		sID := p.newSerialNo()
 		n, err := browserConn.Read(bs)

@@ -230,9 +230,9 @@ func (p *Progress) proxyCreateBrowserConnHandler(cID, sID uint16) {
 	}
 
 	p.ForwardConnRID.Store(cID, forwardConn)
-	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , sID is : %v , forward local address is : %v !", cID, sID, forwardConn.LocalAddr())
+	log.Printf("Progress#proxyCreateBrowserConnHandler : dial forward addr success , cID is : %v , sID is : %v , forward local address is : %v , forward remote address is : %v !", cID, sID, forwardConn.LocalAddr(), forwardConn.RemoteAddr())
 	p.sendCreateConnDoneEvent(cID, sID)
-	bs := make([]byte, 4096, 4096)
+	bs := make([]byte, 1024, 1024)
 	for {
 		log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v , sID is : %v !", cID, sID)
 		sID = p.newSerialNo()
