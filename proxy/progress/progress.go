@@ -5,6 +5,7 @@ import (
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
 	"github.com/godaner/ip/proxy/config"
+	"io"
 	"log"
 	"math"
 	"math/rand"
@@ -63,15 +64,16 @@ func (p *Progress) fromClientConnHandler(l net.Listener) {
 				ippLength := binary.BigEndian.Uint32(length)
 				log.Printf("Progress#fromClientConnHandler : read info from client ippLength is : %v !", ippLength)
 				bs := make([]byte, ippLength, ippLength)
-				n, err = clientConn.Read(bs)
+				n, err = io.ReadFull(clientConn,bs)
 				if err != nil {
 					log.Printf("Progress#fromClientConnHandler : read info from client err , err is : %v !", err.Error())
 					// close client connection , wait client reconnect
 					//clientConn.Close()
 					break
 				}
+				log.Printf("Progress#fromClientConnHandler : read info from client ipp len is : %v !", n)
 				m := ippnew.NewMessage(p.Config.IPPVersion)
-				m.UnMarshall(bs[0:n])
+				m.UnMarshall(bs)
 				cID := m.CID()
 				sID := m.SerialId()
 				switch m.Type() {

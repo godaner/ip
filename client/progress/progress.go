@@ -5,6 +5,7 @@ import (
 	"github.com/godaner/ip/client/config"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
+	"io"
 	"log"
 	"math"
 	"math/rand"
@@ -115,19 +116,18 @@ func (p *Progress) fromProxyHandler() {
 		ippLength := binary.BigEndian.Uint32(length)
 		log.Printf("Progress#fromProxyHandler : receive info from proxy ippLength is : %v !", ippLength)
 		bs := make([]byte, ippLength, ippLength)
-		n, err = p.ProxyConn.Read(bs)
+		n, err = io.ReadFull(p.ProxyConn, bs)
 		if err != nil {
 			log.Printf("Progress#fromProxyHandler : receive proxy err , err is : %v !", err)
 			p.setRestartSignal()
 			return
 		}
-		s := bs[0:n]
-		log.Printf("Progress#fromProxyHandler : receive proxy msg , len is : %v !", n)
+		log.Printf("Progress#fromProxyHandler : receive proxy msg , ipp len is : %v !", n)
 		//if n <= 0 {
 		//	continue
 		//}
 		m := ippnew.NewMessage(p.Config.IPPVersion)
-		m.UnMarshall(s)
+		m.UnMarshall(bs)
 		cID := m.CID()
 		switch m.Type() {
 		case ipp.MSG_TYPE_HELLO:
@@ -137,13 +137,11 @@ func (p *Progress) fromProxyHandler() {
 			go p.proxyCreateBrowserConnHandler(cID, sID)
 		case ipp.MSG_TYPE_CONN_CLOSE:
 			log.Printf("Progress#fromProxyHandler : receive proxy conn close , cID is : %v , sID is : %v !", cID, sID)
-			go func() {
-				p.proxyCloseBrowserConnHandler(cID, sID)
-			}()
+			p.proxyCloseBrowserConnHandler(cID, sID)
 		case ipp.MSG_TYPE_REQ:
 			log.Printf("Progress#fromProxyHandler : receive proxy req , cID is : %v , sID is : %v !", cID, sID)
 			// receive proxy req info , we should dispatch the info
-			go p.fromProxyReqHandler(m)
+			p.fromProxyReqHandler(m)
 
 		default:
 			log.Println("Progress#fromProxyHandler : receive proxy msg , but can't find type !")
