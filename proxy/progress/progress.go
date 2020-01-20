@@ -10,6 +10,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -104,9 +105,9 @@ func (p *Progress) receiveClientMsg(c net.Conn) {
 	}
 
 }
-func (p *Progress) sendBrowserConnCreateEvent(clientConn, browserConn net.Conn, cID, sID uint16) (success bool) {
+func (p *Progress) sendBrowserConnCreateEvent(clientConn, browserConn net.Conn, clientWannaProxyPort string, cID, sID uint16) (success bool) {
 	m := ippnew.NewMessage(p.Config.IPPVersion)
-	m.ForConnCreate([]byte{}, cID, sID)
+	m.ForConnCreate([]byte(clientWannaProxyPort), cID, sID)
 	//marshal
 	b := m.Marshall()
 	ippLen := make([]byte, 4, 4)
@@ -142,54 +143,71 @@ func (p *Progress) sendBrowserConnCloseEvent(clientConn net.Conn, cID, sID uint1
 // clientHelloHandler
 //  处理client发送过来的hello
 func (p *Progress) clientHelloHandler(clientConn *conn.IPConn, clientWannaProxyPort string, sID uint16) {
+	clientWannaProxyPorts := strings.Split(clientWannaProxyPort, ",")
+	for _, port := range clientWannaProxyPorts {
+		// 监听client想监听的端口
+		err := p.listenBrowser(clientConn, port, sID)
+		if err != nil {
+			// say hello to client , if listen fail , return "" port to client
+			p.sayHello(clientConn, "", sID)
+			return
+		}
+
+	}
+	// say hello to client , if listen fail , return "" port to client
+	p.sayHello(clientConn, clientWannaProxyPort, sID)
+
+}
+
+// listenBrowser
+//  监听browser信息
+func (p *Progress) listenBrowser(clientConn *conn.IPConn, clientWannaProxyPort string, sID uint16) (err error) {
 
 	// listen clientWannaProxyPort. data from browser , to client
 	l, err := net.Listen("tcp", ":"+clientWannaProxyPort)
 	if err != nil {
-		log.Printf("Progress#ListenClientWannaProxyPort : listen clientWannaProxyPort err , err is : %v !", err)
-		clientWannaProxyPort = ""
+		log.Printf("Progress#listenBrowser : listen clientWannaProxyPort err , err is : %v !", err)
+		return err
 	}
 	// check client conn
 	go func() {
 		<-clientConn.IsClose()
-		log.Println("Progress#ListenClientWannaProxyPort : get client conn close signal , we will close listener !")
+		log.Println("Progress#listenBrowser : get client conn close signal , we will close listener !")
 		if l == nil {
 			return
 		}
 		err := l.Close()
 		if err != nil {
-			log.Printf("Progress#ListenClientWannaProxyPort : after get client conn close signal , we will close listener err , err is : %v !", err.Error())
+			log.Printf("Progress#listenBrowser : after get client conn close signal , we will close listener err , err is : %v !", err.Error())
 		}
 	}()
-	// say hello to client , if listen fail , return "" port to client
-	p.sayHello(clientConn, clientWannaProxyPort, sID)
-	if clientWannaProxyPort == "" {
-		return
-	}
-	log.Printf("Progress#clientHelloHandler : listen browser port is : %v !", clientWannaProxyPort)
-	for {
-		// when listener stop , we stop accept
-		c, err := l.Accept()
-		if err != nil {
-			log.Printf("Progress#clientHelloHandler : accept browser conn err , err is : %v !", err.Error())
-			break
+	log.Printf("Progress#listenBrowser : listen browser port is : %v !", clientWannaProxyPort)
+	go func() {
+		for {
+			// when listener stop , we stop accept
+			c, err := l.Accept()
+			if err != nil {
+				log.Printf("Progress#listenBrowser : accept browser conn err , err is : %v !", err.Error())
+				break
+			}
+			// cID sID
+			cID := p.newSerialNo()
+			sID := p.newSerialNo()
+			// check browser conn
+			browserConn := conn.NewIPConn(c)
+			go func() {
+				<-browserConn.IsClose()
+				log.Println("Progress#listenBrowser : browser conn is close !")
+				p.BrowserConnRID.Delete(cID)
+				p.sendBrowserConnCloseEvent(clientConn, cID, sID)
+			}()
+			// rem browser conn and notify client
+			p.BrowserConnRID.Store(cID, browserConn)
+			p.sendBrowserConnCreateEvent(clientConn, browserConn, clientWannaProxyPort, cID, sID)
+			log.Printf("Progress#listenBrowser : accept a browser conn success , cID is : %v , sID is : %v , clientWannaProxyPort is : %v , browser addr is : %v !", cID, sID, clientWannaProxyPort, browserConn.RemoteAddr())
 		}
-		// cID sID
-		cID := p.newSerialNo()
-		sID := p.newSerialNo()
-		// check browser conn
-		browserConn := conn.NewIPConn(c)
-		go func() {
-			<-browserConn.IsClose()
-			log.Println("Progress#clientHelloHandler : browser conn is close !")
-			p.BrowserConnRID.Delete(cID)
-			p.sendBrowserConnCloseEvent(clientConn, cID, sID)
-		}()
-		// rem browser conn and notify client
-		p.BrowserConnRID.Store(cID, browserConn)
-		p.sendBrowserConnCreateEvent(clientConn, browserConn, cID, sID)
-		log.Printf("Progress#clientHelloHandler : accept a browser conn success , cID is : %v , sID is : %v , clientWannaProxyPort is : %v , browser addr is : %v !", cID, sID, clientWannaProxyPort, browserConn.RemoteAddr())
-	}
+	}()
+	return nil
 }
 
 // clientConnCreateDoneHandler

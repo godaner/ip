@@ -10,6 +10,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -98,7 +99,8 @@ func (p *Progress) listenProxy() {
 	cID := uint16(0)
 	sID := p.newSerialNo()
 	m := ippnew.NewMessage(p.Config.IPPVersion)
-	m.ForHelloReq([]byte(p.Config.ClientWannaProxyPort), cID, sID)
+	clientWannaProxyPorts := p.getClientProxyMappingPorts()
+	m.ForHelloReq([]byte(clientWannaProxyPorts), cID, sID)
 	b := m.Marshall()
 	ippLen := make([]byte, 4, 4)
 	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
@@ -147,10 +149,10 @@ func (p *Progress) receiveProxyMsg() {
 			switch m.Type() {
 			case ipp.MSG_TYPE_HELLO:
 				log.Printf("Progress#fromProxyHandler : receive proxy hello , cID is : %v , sID is : %v !", cID, sID)
-				p.clientProxyHello(m, cID, sID)
+				p.proxyHelloHandler(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CREATE:
 				log.Printf("Progress#fromProxyHandler : receive proxy conn create , cID is : %v , sID is : %v !", cID, sID)
-				go p.proxyCreateBrowserConnHandler(cID, sID)
+				go p.proxyCreateBrowserConnHandler(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CLOSE:
 				log.Printf("Progress#fromProxyHandler : receive proxy conn close , cID is : %v , sID is : %v !", cID, sID)
 				p.proxyCloseBrowserConnHandler(cID, sID)
@@ -191,10 +193,12 @@ func (p *Progress) proxyReqHandler(m ipp.Message) {
 
 // proxyCreateBrowserConnHandler
 //  处理proxy回复的conn_create信息
-func (p *Progress) proxyCreateBrowserConnHandler(cID, sID uint16) {
+func (p *Progress) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 	//// proxy return browser conn create , we should dial forward addr ////
-	addr := p.Config.ClientForwardAddr
-	c, err := net.Dial("tcp", addr)
+	port := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))
+	//addr := p.Config.ClientForwardAddr
+	forwardAddr := p.getClientProxyForwardAddrByPort(port)
+	c, err := net.Dial("tcp", forwardAddr)
 	if err != nil {
 		// if dial fail , tell proxy to close browser conn
 		log.Printf("Progress#proxyCreateBrowserConnHandler : after get proxy browser conn create , dial forward err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err)
@@ -307,14 +311,14 @@ func (p *Progress) proxyCloseBrowserConnHandler(cID, sID uint16) {
 	}
 }
 
-func (p *Progress) clientProxyHello(m ipp.Message, cID uint16, sID uint16) {
+func (p *Progress) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 	port := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))
-	if port == "" {
-		log.Printf("Progress#clientProxyHello : maybe listen port in porxy side be occupied , cID is : %v , sID is : %v !", cID, sID)
+	if port != p.getClientProxyMappingPorts() {
+		log.Printf("Progress#proxyHelloHandler : maybe listen port in porxy side be occupied , cID is : %v , sID is : %v !", cID, sID)
 		p.setRestartSignal()
 		return
 	}
-	log.Printf("Progress#clientProxyHello : listen port success in porxy side , port is : %v , cID is : %v , sID is : %v !", port, cID, sID)
+	log.Printf("Progress#proxyHelloHandler : listen port success in porxy side , port is : %v , cID is : %v , sID is : %v !", port, cID, sID)
 	return
 }
 
@@ -323,4 +327,31 @@ func (p *Progress) newSerialNo() uint16 {
 	atomic.CompareAndSwapInt32(&p.seq, math.MaxUint16, 0)
 	atomic.AddInt32(&p.seq, 1)
 	return uint16(p.seq)
+}
+
+// getClientProxyMappingPorts
+//  from 12345:192.168.6.207:443,1234:192.168.6.207:22
+//  to 12345,1234
+func (p *Progress) getClientProxyMappingPorts() (ports string) {
+	ps := []string{}
+	mappings := strings.Split(p.Config.ClientProxyMapping, ",")
+	for _, m := range mappings {
+		p := strings.Split(m, ":")[0]
+		ps = append(ps, p)
+	}
+	return strings.Join(ps, ",")
+}
+
+// getClientProxyForwardAddrByPort
+//  eg. 12345:192.168.6.207:443,1234:192.168.6.207:22
+func (p *Progress) getClientProxyForwardAddrByPort(port string) (forwardAddr string) {
+	mappings := strings.Split(p.Config.ClientProxyMapping, ",")
+	for _, m := range mappings {
+		a := strings.Split(m, ":")
+		forwardAddr = a[1] + ":" + a[2]
+		if port == a[0] {
+			return forwardAddr
+		}
+	}
+	return ""
 }

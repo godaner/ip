@@ -16,10 +16,11 @@ var (
 )
 
 type Config struct {
-	ProxyAddr            string
-	ClientForwardAddr    string
-	ClientWannaProxyPort string
-	IPPVersion           int
+	ProxyAddr string
+	//ClientForwardAddr    string
+	//ClientWannaProxyPort string
+	ClientProxyMapping string
+	IPPVersion         int
 }
 
 func (c *Config) Load() (err error) {
@@ -43,8 +44,9 @@ func (c *Config) Load() (err error) {
 		return err
 	}
 	c.ProxyAddr = globalConfig["proxy_addr"]
-	c.ClientForwardAddr = globalConfig["client_forward_addr"]
-	c.ClientWannaProxyPort = globalConfig["client_wanna_proxy_port"]
+	//c.ClientForwardAddr = globalConfig["client_forward_addr"]
+	//c.ClientWannaProxyPort = globalConfig["client_wanna_proxy_port"]
+	c.ClientProxyMapping = globalConfig["client_proxy_mapping"]
 	iv, _ := strconv.ParseInt(globalConfig["ipp_version"], 10, 64)
 	c.IPPVersion = int(iv)
 	return nil

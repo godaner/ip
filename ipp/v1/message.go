@@ -162,6 +162,12 @@ func (m *Message) ForConnCreateDone(body []byte, cID, sID uint16) {
 }
 func (m *Message) ForConnCreate(body []byte, cID, sID uint16) {
 	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, cID, sID)
+	m.Attr = []Attr{
+		{
+			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(body)), AV: body,
+		},
+	}
+	m.Header.HAttrNum = byte(len(m.Attr))
 }
 
 func (m *Message) ForConnClose(body []byte, cID, sID uint16) {
