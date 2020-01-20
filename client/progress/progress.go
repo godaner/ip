@@ -9,9 +9,9 @@ import (
 	"io"
 	"log"
 	"math"
-	"math/rand"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,6 +24,7 @@ type Progress struct {
 	Config         *config.Config
 	RestartSignal  chan int
 	ForwardConnRID sync.Map // map[uint16]net.Conn
+	seq            int32
 }
 
 func (p *Progress) Listen() (err error) {
@@ -146,6 +147,7 @@ func (p *Progress) receiveProxyMsg() {
 			switch m.Type() {
 			case ipp.MSG_TYPE_HELLO:
 				log.Printf("Progress#fromProxyHandler : receive proxy hello , cID is : %v , sID is : %v !", cID, sID)
+				p.clientProxyHello(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CREATE:
 				log.Printf("Progress#fromProxyHandler : receive proxy conn create , cID is : %v , sID is : %v !", cID, sID)
 				go p.proxyCreateBrowserConnHandler(cID, sID)
@@ -305,10 +307,20 @@ func (p *Progress) proxyCloseBrowserConnHandler(cID, sID uint16) {
 	}
 }
 
+func (p *Progress) clientProxyHello(m ipp.Message, cID uint16, sID uint16) {
+	port := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))
+	if port == "" {
+		log.Printf("Progress#clientProxyHello : maybe listen port in porxy side be occupied , cID is : %v , sID is : %v !", cID, sID)
+		p.setRestartSignal()
+		return
+	}
+	log.Printf("Progress#clientProxyHello : listen port success in porxy side , port is : %v , cID is : %v , sID is : %v !", port, cID, sID)
+	return
+}
+
 //产生随机序列号
 func (p *Progress) newSerialNo() uint16 {
-	time.Sleep(1 * (time.Millisecond))
-	rand.Seed(time.Now().UnixNano())
-	r := rand.Intn(math.MaxUint16)
-	return uint16(r)
+	atomic.CompareAndSwapInt32(&p.seq, math.MaxUint16, 0)
+	atomic.AddInt32(&p.seq, 1)
+	return uint16(p.seq)
 }

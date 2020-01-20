@@ -10,7 +10,7 @@ const (
 	_ = iota
 	// 业务数据请求交互
 	MSG_TYPE_REQ = iota
-	// 初始数据交换，如client_wanna_proxy_port；
+	// 初始数据交换，如client_wanna_proxy_port等；
 	MSG_TYPE_HELLO = iota
 	// 连接建立通知
 	MSG_TYPE_CONN_CREATE = iota

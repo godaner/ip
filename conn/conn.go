@@ -1,7 +1,7 @@
 package conn
 
 import "net"
-
+// IPConn
 type IPConn struct {
 	net.Conn
 	isClose chan int
