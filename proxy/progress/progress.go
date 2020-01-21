@@ -68,7 +68,7 @@ func (p *Progress) receiveClientMsg(c net.Conn) {
 			n, err := clientConn.Read(length)
 			if err != nil {
 				log.Printf("Progress#receiveClientMsg : read ipp len info from client err , err is : %v !", err.Error())
-				return
+				continue
 			}
 			ippLength := binary.BigEndian.Uint32(length)
 			log.Printf("Progress#receiveClientMsg : read info from client ippLength is : %v !", ippLength)
@@ -76,7 +76,7 @@ func (p *Progress) receiveClientMsg(c net.Conn) {
 			n, err = io.ReadFull(clientConn, bs)
 			if err != nil {
 				log.Printf("Progress#receiveClientMsg : read info from client err , err is : %v !", err.Error())
-				return
+				continue
 			}
 			log.Printf("Progress#receiveClientMsg : read info from client ipp len is : %v !", n)
 			m := ippnew.NewMessage(p.Config.IPPVersion)
@@ -212,7 +212,7 @@ func (p *Progress) listenBrowser(clientConn *conn.IPConn, clientWannaProxyPort s
 
 // clientConnCreateDoneHandler
 //  开始监听用户发送的消息
-func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uint16) {
+func (p *Progress) clientConnCreateDoneHandler(clientConn *conn.IPConn, cID, sID uint16) {
 	v, ok := p.BrowserConnRID.Load(cID)
 	if !ok {
 		return
@@ -228,6 +228,10 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 		case <-browserConn.IsClose():
 			log.Printf("Progress#clientConnCreateDoneHandler : get browser conn close signal , will stop read browser conn , cID is : %v , sID is : %v !", cID, sID)
 			return
+		case <-clientConn.IsClose():
+			log.Printf("Progress#clientConnCreateDoneHandler : get client conn close signal , will stop read browser conn , cID is : %v , sID is : %v !", cID, sID)
+			browserConn.Close()
+			return
 		default:
 			log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive browser msg , cID is : %v , sID is : %v !", cID, sID)
 			// build protocol to client
@@ -236,7 +240,7 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 			s := bs[0:n]
 			if err != nil {
 				log.Printf("Progress#clientConnCreateDoneHandler : read browser data err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err.Error())
-				return
+				continue
 			}
 			//if n <= 0 {
 			//	continue
@@ -252,7 +256,7 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn net.Conn, cID, sID uin
 			n, err = clientConn.Write(b)
 			if err != nil {
 				log.Printf("Progress#clientConnCreateDoneHandler : send browser data to client err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err.Error())
-				return
+				continue
 			}
 			log.Printf("Progress#clientConnCreateDoneHandler : from proxy to client , cID is : %v , sID is : %v , len is : %v !", cID, sID, n)
 		}

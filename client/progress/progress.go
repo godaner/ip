@@ -131,7 +131,7 @@ func (p *Progress) receiveProxyMsg() {
 			n, err := p.ProxyConn.Read(length)
 			if err != nil {
 				log.Printf("Progress#fromProxyHandler : receive proxy ipp len err , err is : %v !", err)
-				return
+				continue
 			}
 			ippLength := binary.BigEndian.Uint32(length)
 			log.Printf("Progress#fromProxyHandler : receive info from proxy ippLength is : %v !", ippLength)
@@ -139,7 +139,7 @@ func (p *Progress) receiveProxyMsg() {
 			n, err = io.ReadFull(p.ProxyConn, bs)
 			if err != nil {
 				log.Printf("Progress#fromProxyHandler : receive proxy err , err is : %v !", err)
-				return
+				continue
 			}
 			log.Printf("Progress#fromProxyHandler : receive proxy msg , ipp len is : %v !", n)
 			m := ippnew.NewMessage(p.Config.IPPVersion)
@@ -229,9 +229,15 @@ func (p *Progress) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16)
 		select {
 		case <-p.RestartSignal:
 			log.Printf("Progress#proxyCreateBrowserConnHandler : get client restart signal , will stop read forward conn , cID is : %v , sID is : %v !", cID, sID)
+			forwardConn.Close()
+			return
+		case <-p.ProxyConn.IsClose():
+			log.Printf("Progress#proxyCreateBrowserConnHandler : get proxy conn close signal , will stop read forward conn , cID is : %v , sID is : %v !", cID, sID)
+			forwardConn.Close()
 			return
 		case <-forwardConn.IsClose():
 			log.Printf("Progress#proxyCreateBrowserConnHandler : get forward conn close signal , will stop read forward conn , cID is : %v , sID is : %v !", cID, sID)
+			//forwardConn.Close()
 			return
 		default:
 			log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive forward msg , cID is : %v , sID is : %v !", cID, sID)
@@ -239,7 +245,7 @@ func (p *Progress) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16)
 			n, err := forwardConn.Read(bs)
 			if err != nil {
 				log.Printf("Progress#proxyCreateBrowserConnHandler : read forward data err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err)
-				return
+				continue
 			}
 			log.Printf("Progress#proxyCreateBrowserConnHandler : receive forward msg , cID is : %v , sID is : %v , len is : %v !", cID, sID, n)
 			//if n <= 0 {
@@ -255,7 +261,7 @@ func (p *Progress) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16)
 			n, err = p.ProxyConn.Write(b)
 			if err != nil {
 				log.Printf("Progress#proxyCreateBrowserConnHandler : write forward's data to proxy err , cID is : %v , sID is : %v , err is : %v !", cID, sID, err.Error())
-				return
+				continue
 			}
 			log.Printf("Progress#proxyCreateBrowserConnHandler : from client to proxy msg , cID is : %v , sID is : %v , len is : %v !", cID, sID, n)
 
