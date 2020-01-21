@@ -107,6 +107,8 @@ func (p *Client) listenProxy() {
 			p.setRestartSignal()
 			log.Printf("Client#Listen : can't receive proxy hello in %vs , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , cliID is : %v !", restart_interval, p.cliID)
 			return
+		case <-p.restartSignal:
+			return
 		case <-p.proxyHelloSignal:
 			return
 		}
