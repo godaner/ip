@@ -324,6 +324,8 @@ func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 	cliID, err := strconv.ParseInt(string(m.AttributeByType(ipp.ATTR_TYPE_CLI_ID)), 10, 32)
 	if err != nil {
 		log.Printf("Client#proxyHelloHandler : accept proxy hello , parse cliID err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
+		p.setRestartSignal()
+		return
 	}
 	p.cliID = uint16(cliID)
 	port := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))

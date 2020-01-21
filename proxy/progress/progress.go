@@ -233,7 +233,10 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn *conn.IPConn, cliID, c
 				return
 			case <-clientConn.IsClose():
 				log.Printf("Progress#clientConnCreateDoneHandler : get client conn close signal , will stop read browser conn , cliID is : %v , cID is : %v , sID is : %v !", cliID, cID, sID)
-				browserConn.Close()
+				err := browserConn.Close()
+				if err != nil {
+					log.Printf("Progress#clientConnCreateDoneHandler : close browser conn when client conn close err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", cliID, cID, sID, err.Error())
+				}
 				return
 			default:
 				log.Printf("Progress#proxyCreateBrowserConnHandler : wait receive browser msg , cliID is : %v , cID is : %v , sID is : %v !", cliID, cID, sID)
@@ -309,7 +312,7 @@ func (p *Progress) clientReqHandler(clientConn net.Conn, m ipp.Message) {
 
 func (p *Progress) sayHello(clientConn net.Conn, port string, sID uint16) {
 	// return client hello
-	cliID:=p.newCID()
+	cliID := p.newCID()
 	m := ippnew.NewMessage(p.Config.IPPVersion)
 	m.ForServerHelloReq([]byte(strconv.FormatInt(int64(cliID), 10)), []byte(port), sID)
 	//marshal
@@ -319,10 +322,10 @@ func (p *Progress) sayHello(clientConn net.Conn, port string, sID uint16) {
 	b = append(ippLen, b...)
 	_, err := clientConn.Write(b)
 	if err != nil {
-		log.Printf("Progress#sayHello : return client hello err , cliID is : %v , err is : %v !", cliID,err.Error())
+		log.Printf("Progress#sayHello : return client hello err , cliID is : %v , err is : %v !", cliID, err.Error())
 		return
 	}
-	log.Printf("Progress#sayHello : say hello to client success , cliID is : %v , sID is : %v !", cliID,sID)
+	log.Printf("Progress#sayHello : say hello to client success , cliID is : %v , sID is : %v !", cliID, sID)
 }
 
 //产生随机序列号
