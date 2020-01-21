@@ -29,6 +29,7 @@ func (p *Progress) Listen() (err error) {
 			IPPVersion:           c.IPPVersion,
 			ClientForwardAddr:    clientForwardAddr,
 			ClientWannaProxyPort: clientWannaProxyPort,
+			V2Secret:             c.V2Secret,
 			TempCliID:            cliID,
 		}
 		go client.Start()

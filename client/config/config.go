@@ -21,6 +21,7 @@ type Config struct {
 	//ClientWannaProxyPort string
 	ClientProxyMapping string
 	IPPVersion         int
+	V2Secret           string
 }
 
 func (c *Config) Load() (err error) {
@@ -44,6 +45,7 @@ func (c *Config) Load() (err error) {
 		return err
 	}
 	c.ProxyAddr = globalConfig["proxy_addr"]
+	c.V2Secret = globalConfig["v2_secret"]
 	//c.ClientForwardAddr = globalConfig["client_forward_addr"]
 	//c.ClientWannaProxyPort = globalConfig["client_wanna_proxy_port"]
 	c.ClientProxyMapping = globalConfig["client_proxy_mapping"]

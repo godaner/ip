@@ -4,6 +4,8 @@ const (
 	_ = iota
 	// v1 简单的交互，不支持加密等
 	VERSION_V1 = iota
+	// v2 支持md5加密
+	VERSION_V2 = iota
 )
 
 const (
@@ -39,6 +41,7 @@ type Message interface {
 	CID() uint16
 	SerialId() uint16
 	CliID() uint16
+	Version() byte
 	Attribute(int) Attr
 	AttributeByType(byte) []byte
 	ForClientHelloReq(port []byte, sID uint16)

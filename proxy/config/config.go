@@ -18,6 +18,7 @@ var (
 type Config struct {
 	LocalPort  string
 	IPPVersion int
+	V2Secret   string
 }
 
 func (c *Config) Load() (err error) {
@@ -41,6 +42,7 @@ func (c *Config) Load() (err error) {
 		return err
 	}
 	c.LocalPort = globalConfig["loc_port"]
+	c.V2Secret = globalConfig["v2_secret"]
 	iv, _ := strconv.ParseInt(globalConfig["ipp_version"], 10, 64)
 	c.IPPVersion = int(iv)
 	return nil

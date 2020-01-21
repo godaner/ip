@@ -80,7 +80,7 @@ func (p *Progress) receiveClientMsg(c net.Conn) {
 				log.Printf("Progress#receiveClientMsg : read info from client err , err is : %v !", err.Error())
 				continue
 			}
-			m := ippnew.NewMessage(p.Config.IPPVersion)
+			m := ippnew.NewMessage(p.Config.IPPVersion, ippnew.SetV2Secret(p.Config.V2Secret))
 			m.UnMarshall(bs)
 			cID := m.CID()
 			sID := m.SerialId()
@@ -108,7 +108,7 @@ func (p *Progress) receiveClientMsg(c net.Conn) {
 
 }
 func (p *Progress) sendBrowserConnCreateEvent(clientConn, browserConn net.Conn, clientWannaProxyPort string, cliID, cID, sID uint16) (success bool) {
-	m := ippnew.NewMessage(p.Config.IPPVersion)
+	m := ippnew.NewMessage(p.Config.IPPVersion, ippnew.SetV2Secret(p.Config.V2Secret))
 	m.ForConnCreate([]byte(clientWannaProxyPort), cliID, cID, sID)
 	//marshal
 	b := m.Marshall()
@@ -127,7 +127,7 @@ func (p *Progress) sendBrowserConnCreateEvent(clientConn, browserConn net.Conn, 
 	return true
 }
 func (p *Progress) sendBrowserConnCloseEvent(clientConn net.Conn, cliID, cID, sID uint16) {
-	m := ippnew.NewMessage(p.Config.IPPVersion)
+	m := ippnew.NewMessage(p.Config.IPPVersion, ippnew.SetV2Secret(p.Config.V2Secret))
 	m.ForConnClose([]byte{}, cliID, cID, sID)
 	//marshal
 	b := m.Marshall()
@@ -252,7 +252,7 @@ func (p *Progress) clientConnCreateDoneHandler(clientConn *conn.IPConn, cliID, c
 				//	continue
 				//}
 				log.Printf("Progress#clientConnCreateDoneHandler : accept browser req , cliID is : %v , cID is : %v , sID is : %v , len is : %v !", cliID, cID, sID, n)
-				m := ippnew.NewMessage(p.Config.IPPVersion)
+				m := ippnew.NewMessage(p.Config.IPPVersion, ippnew.SetV2Secret(p.Config.V2Secret))
 				m.ForReq(s, cliID, cID, sID)
 				//marshal
 				b := m.Marshall()
@@ -313,7 +313,7 @@ func (p *Progress) clientReqHandler(clientConn net.Conn, m ipp.Message) {
 func (p *Progress) sayHello(clientConn net.Conn, port string, sID uint16) {
 	// return client hello
 	cliID := p.newCID()
-	m := ippnew.NewMessage(p.Config.IPPVersion)
+	m := ippnew.NewMessage(p.Config.IPPVersion, ippnew.SetV2Secret(p.Config.V2Secret))
 	m.ForServerHelloReq([]byte(strconv.FormatInt(int64(cliID), 10)), []byte(port), sID)
 	//marshal
 	b := m.Marshall()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/godaner/ip/ipp"
+	"github.com/godaner/ip/ipp/v2/encrypt"
 	"log"
 )
 
@@ -16,9 +17,7 @@ type Header struct {
 	HCliID    uint16
 	HAttrNum  byte
 }
-func (m *Message) Version() byte {
-	return m.Header.HVersion
-}
+
 func (h *Header) SerialNo() uint16 {
 	return h.HSerialNo
 }
@@ -67,6 +66,11 @@ type Message struct {
 	Header   Header
 	Attr     []Attr
 	AttrMaps map[byte][]byte
+	Salt     string
+}
+
+func (m *Message) Version() byte {
+	return m.Header.HVersion
 }
 
 func (m *Message) CliID() uint16 {
@@ -96,48 +100,56 @@ func (m *Message) Marshall() []byte {
 	var err error
 	err = binary.Write(buf, binary.BigEndian, m.Header.HVersion)
 	if err != nil {
-		log.Printf("Message#Bytes : binary.Write m.Header.Version err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Write m.Header.Version err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HType)
 	if err != nil {
-		log.Printf("Message#Bytes : binary.Write m.Header.Type err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Write m.Header.Type err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HSerialNo)
 	if err != nil {
-		log.Printf("Message#Bytes : binary.Write m.Header.SerialNo err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Write m.Header.SerialNo err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HCID)
 	if err != nil {
-		log.Printf("Message#Bytes : binary.Write m.Header.HCID err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Write m.Header.HCID err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HCliID)
 	if err != nil {
-		log.Printf("Message#Bytes : binary.Write m.Header.HCliID err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Write m.Header.HCliID err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HAttrNum)
 	if err != nil {
-		log.Printf("Message#Bytes : binary.Write m.Header.AttrNum err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Write m.Header.AttrNum err , err is : %v !", err.Error())
 	}
 	for _, v := range m.Attr {
 		err = binary.Write(buf, binary.BigEndian, v.AT)
 		if err != nil {
-			log.Printf("Message#Bytes : binary.Write m.Header.AttrType err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Write m.Header.AttrType err , err is : %v !", err.Error())
 		}
 		//be careful
 		err = binary.Write(buf, binary.BigEndian, v.AL+3)
 		if err != nil {
-			log.Printf("Message#Bytes : binary.Write m.Header.AttrLen err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Write m.Header.AttrLen err , err is : %v !", err.Error())
 		}
 		err = binary.Write(buf, binary.BigEndian, v.AV)
 		if err != nil {
-			log.Printf("Message#Bytes : binary.Write m.Header.AttrStr err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Write m.Header.AttrStr err , err is : %v !", err.Error())
 		}
 	}
-	return buf.Bytes()
+	b, err := encrypt.AesCBCEncrypt(buf.Bytes(), []byte(m.Salt))
+	if err != nil {
+		log.Printf("Message#Marshall : encrypt err , err is : %v !", err.Error())
+	}
+	return b
 }
 
 func (m *Message) UnMarshall(message []byte) {
-	buf := bytes.NewBuffer(message)
+	b, err := encrypt.AesCBCDncrypt(message, []byte(m.Salt))
+	if err != nil {
+		log.Printf("Message#UnMarshall : dncrypt err , err is : %v !", err.Error())
+	}
+	buf := bytes.NewBuffer(b)
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HVersion); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HVersion err , err is : %v !", err.Error())
 	}
@@ -230,7 +242,7 @@ func (m *Message) ForReq(body []byte, cliID, cID, sID uint16) {
 
 func (m *Message) newMessage(typ byte, cliID, cID, sID uint16) {
 	header := Header{}
-	header.HVersion = ipp.VERSION_V1
+	header.HVersion = ipp.VERSION_V2
 	header.HType = typ
 	header.HSerialNo = sID
 	header.HCID = cID

@@ -25,6 +25,7 @@ type Client struct {
 	ClientForwardAddr    string
 	ClientWannaProxyPort string
 	TempCliID            uint16
+	V2Secret             string
 	proxyConn            *conn.IPConn
 	restartSignal        chan int
 	forwardConnRID       sync.Map // map[uint16]net.Conn
@@ -93,7 +94,7 @@ func (p *Client) listenProxy() {
 	//// say hello to proxy ////
 	cID := uint16(0)
 	sID := p.newSerialNo()
-	m := ippnew.NewMessage(p.IPPVersion)
+	m := ippnew.NewMessage(p.IPPVersion, ippnew.SetV2Secret(p.V2Secret))
 	clientWannaProxyPorts := p.ClientWannaProxyPort
 	m.ForClientHelloReq([]byte(clientWannaProxyPorts), sID)
 	b := m.Marshall()
@@ -135,7 +136,7 @@ func (p *Client) receiveProxyMsg() {
 				log.Printf("Client#fromProxyHandler : receive proxy err , cliID is : %v , err is : %v !", p.cliID, err)
 				continue
 			}
-			m := ippnew.NewMessage(p.IPPVersion)
+			m := ippnew.NewMessage(p.IPPVersion, ippnew.SetV2Secret(p.V2Secret))
 			m.UnMarshall(bs)
 			cID := m.CID()
 			// choose handler
@@ -248,7 +249,8 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 				//if n <= 0 {
 				//	return
 				//}
-				m := ippnew.NewMessage(p.IPPVersion)
+
+				m := ippnew.NewMessage(p.IPPVersion, ippnew.SetV2Secret(p.V2Secret))
 				m.ForReq(bs[0:n], p.cliID, cID, sID)
 				//marshal
 				b := m.Marshall()
@@ -271,7 +273,8 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 	p.sendCreateConnDoneEvent(cID, sID)
 }
 func (p *Client) sendCreateConnDoneEvent(cID, sID uint16) {
-	m := ippnew.NewMessage(p.IPPVersion)
+
+	m := ippnew.NewMessage(p.IPPVersion, ippnew.SetV2Secret(p.V2Secret))
 	m.ForConnCreateDone([]byte{}, p.cliID, cID, sID)
 	//marshal
 	b := m.Marshall()
@@ -286,7 +289,8 @@ func (p *Client) sendCreateConnDoneEvent(cID, sID uint16) {
 	return
 }
 func (p *Client) sendForwardConnCloseEvent(cID, sID uint16) {
-	m := ippnew.NewMessage(p.IPPVersion)
+
+	m := ippnew.NewMessage(p.IPPVersion, ippnew.SetV2Secret(p.V2Secret))
 	m.ForConnClose([]byte{}, p.cliID, cID, sID)
 	//marshal
 	b := m.Marshall()
@@ -321,6 +325,7 @@ func (p *Client) proxyCloseBrowserConnHandler(cID, sID uint16) {
 // proxyHelloHandler
 //  处理proxy返回的hello信息
 func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
+	// get client id from proxy response
 	cliID, err := strconv.ParseInt(string(m.AttributeByType(ipp.ATTR_TYPE_CLI_ID)), 10, 32)
 	if err != nil {
 		log.Printf("Client#proxyHelloHandler : accept proxy hello , parse cliID err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
@@ -328,6 +333,15 @@ func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 		return
 	}
 	p.cliID = uint16(cliID)
+
+	// check version
+	if m.Version() != byte(p.IPPVersion) {
+		log.Printf("Client#proxyHelloHandler : accept proxy hello , but ipp version is not right , proxy version is : %v , client version is :%v , cliID is : %v , cID is : %v , sID is : %v !", m.Version(), p.IPPVersion, p.cliID, cID, sID)
+		p.setRestartSignal()
+		return
+	}
+
+	// check port
 	port := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))
 	if port != p.ClientWannaProxyPort {
 		log.Printf("Client#proxyHelloHandler : maybe listen port in porxy side be occupied , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
