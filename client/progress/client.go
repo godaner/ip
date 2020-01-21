@@ -2,6 +2,7 @@ package progress
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"github.com/godaner/ip/conn"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
@@ -31,6 +32,7 @@ type Client struct {
 	forwardConnRID       sync.Map // map[uint16]net.Conn
 	seq                  int32
 	cliID                uint16
+	proxyHelloSignal     chan bool
 }
 
 func (p *Client) Start() {
@@ -64,6 +66,10 @@ func (p *Client) setRestartSignal() {
 	}
 }
 func (p *Client) listenProxy() {
+	//// print info ////
+	i, _ := json.Marshal(p)
+	log.Printf("Client#Listen : print client info , cliID is : %v , info is : %v !", p.cliID, string(i))
+
 	//// init var ////
 	// reset restart signal
 	p.restartSignal = make(chan int)
@@ -92,6 +98,20 @@ func (p *Client) listenProxy() {
 	}()
 
 	//// say hello to proxy ////
+	// wait some time , then check the proxy hello response
+	go func() {
+		p.proxyHelloSignal = make(chan bool)
+		// check
+		select {
+		case <-time.After(restart_interval * time.Second):
+			p.setRestartSignal()
+			log.Printf("Client#Listen : can't receive proxy hello in %vs , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , cliID is : %v !", restart_interval, p.cliID)
+			return
+		case <-p.proxyHelloSignal:
+			return
+		}
+	}()
+	// send hello ipp
 	cID := uint16(0)
 	sID := p.newSerialNo()
 	m := ippnew.NewMessage(p.IPPVersion, ippnew.SetV2Secret(p.V2Secret))
@@ -107,6 +127,7 @@ func (p *Client) listenProxy() {
 		return
 	}
 	log.Printf("Client#Listen : say hello to proxy success , cliID is : %v , cID is : %v , sID is : %v , proxy addr is : %v !", p.cliID, cID, sID, addr)
+
 }
 
 // receiveProxyMsg
@@ -116,6 +137,10 @@ func (p *Client) receiveProxyMsg() {
 		select {
 		case <-p.restartSignal:
 			log.Printf("Client#receiveProxyMsg : get client restart signal , will stop read proxy conn , cliID is : %v !", p.cliID)
+			err := p.proxyConn.Close()
+			if err != nil {
+				log.Printf("Client#receiveProxyMsg : close proxy conn when client restart err , cliID is : %v , err is : %v !", p.cliID, err.Error())
+			}
 			return
 		case <-p.proxyConn.IsClose():
 			log.Printf("Client#receiveProxyMsg : get proxy conn close signal , will stop read proxy conn , cliID is : %v !", p.cliID)
@@ -126,36 +151,40 @@ func (p *Client) receiveProxyMsg() {
 			length := make([]byte, 4, 4)
 			_, err := p.proxyConn.Read(length)
 			if err != nil {
-				log.Printf("Client#fromProxyHandler : receive proxy ipp len err , cliID is : %v , err is : %v !", p.cliID, err)
+				log.Printf("Client#receiveProxyMsg : receive proxy ipp len err , cliID is : %v , err is : %v !", p.cliID, err)
 				continue
 			}
 			ippLength := binary.BigEndian.Uint32(length)
 			bs := make([]byte, ippLength, ippLength)
 			_, err = io.ReadFull(p.proxyConn, bs)
 			if err != nil {
-				log.Printf("Client#fromProxyHandler : receive proxy err , cliID is : %v , err is : %v !", p.cliID, err)
+				log.Printf("Client#receiveProxyMsg : receive proxy err , cliID is : %v , err is : %v !", p.cliID, err)
 				continue
 			}
 			m := ippnew.NewMessage(p.IPPVersion, ippnew.SetV2Secret(p.V2Secret))
-			m.UnMarshall(bs)
+			err = m.UnMarshall(bs)
+			if err != nil {
+				log.Printf("Client#receiveProxyMsg : UnMarshall proxy err , maybe version not right or data is not right , cliID is : %v , err is : %v !", p.cliID, err)
+				continue
+			}
 			cID := m.CID()
 			// choose handler
 			switch m.Type() {
 			case ipp.MSG_TYPE_PROXY_HELLO:
-				log.Printf("Client#fromProxyHandler : receive proxy hello , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+				log.Printf("Client#receiveProxyMsg : receive proxy hello , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyHelloHandler(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CREATE:
-				log.Printf("Client#fromProxyHandler : receive proxy conn create , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+				log.Printf("Client#receiveProxyMsg : receive proxy conn create , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyCreateBrowserConnHandler(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CLOSE:
-				log.Printf("Client#fromProxyHandler : receive proxy conn close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+				log.Printf("Client#receiveProxyMsg : receive proxy conn close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyCloseBrowserConnHandler(cID, sID)
 			case ipp.MSG_TYPE_REQ:
-				log.Printf("Client#fromProxyHandler : receive proxy req , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+				log.Printf("Client#receiveProxyMsg : receive proxy req , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				// receive proxy req info , we should dispatch the info
 				p.proxyReqHandler(m)
 			default:
-				log.Printf("Client#fromProxyHandler : receive proxy msg , but can't find type , cliID is : %v !", p.cliID)
+				log.Printf("Client#receiveProxyMsg : receive proxy msg , but can't find type , cliID is : %v !", p.cliID)
 			}
 		}
 	}
@@ -325,6 +354,7 @@ func (p *Client) proxyCloseBrowserConnHandler(cID, sID uint16) {
 // proxyHelloHandler
 //  处理proxy返回的hello信息
 func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
+	close(p.proxyHelloSignal)
 	// get client id from proxy response
 	cliID, err := strconv.ParseInt(string(m.AttributeByType(ipp.ATTR_TYPE_CLI_ID)), 10, 32)
 	if err != nil {

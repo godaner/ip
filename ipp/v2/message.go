@@ -3,6 +3,8 @@ package v1
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/v2/encrypt"
 	"log"
@@ -66,7 +68,7 @@ type Message struct {
 	Header   Header
 	Attr     []Attr
 	AttrMaps map[byte][]byte
-	Salt     string
+	Secret   string
 }
 
 func (m *Message) Version() byte {
@@ -96,6 +98,11 @@ func (m *Message) Attribute(index int) ipp.Attr {
 	return &m.Attr[index]
 }
 func (m *Message) Marshall() []byte {
+	defer func() {
+		if info := recover(); info != nil {
+			log.Printf("Message#Marshall : panic err , err is : %v !", info)
+		}
+	}()
 	buf := new(bytes.Buffer)
 	var err error
 	err = binary.Write(buf, binary.BigEndian, m.Header.HVersion)
@@ -137,36 +144,49 @@ func (m *Message) Marshall() []byte {
 			log.Printf("Message#Marshall : binary.Write m.Header.AttrStr err , err is : %v !", err.Error())
 		}
 	}
-	b, err := encrypt.AesCBCEncrypt(buf.Bytes(), []byte(m.Salt))
+	b, err := encrypt.AesCBCEncrypt(buf.Bytes(), []byte(m.Secret))
 	if err != nil {
 		log.Printf("Message#Marshall : encrypt err , err is : %v !", err.Error())
 	}
 	return b
 }
 
-func (m *Message) UnMarshall(message []byte) {
-	b, err := encrypt.AesCBCDncrypt(message, []byte(m.Salt))
+func (m *Message) UnMarshall(message []byte) (err error) {
+	defer func() {
+		if info := recover(); info != nil {
+			log.Printf("Message#UnMarshall : panic err , err is : %v !", info)
+			err = errors.New(fmt.Sprint(info))
+		}
+	}()
+	b, err := encrypt.AesCBCDncrypt(message, []byte(m.Secret))
 	if err != nil {
 		log.Printf("Message#UnMarshall : dncrypt err , err is : %v !", err.Error())
+		return err
 	}
 	buf := bytes.NewBuffer(b)
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HVersion); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HVersion err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HType); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HType err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HSerialNo); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HSerialNo err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HCID); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HCID err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HCliID); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HCliID err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HAttrNum); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HAttrNum err , err is : %v !", err.Error())
+		return err
 	}
 
 	m.Attr = make([]Attr, m.Header.AttrNum())
@@ -176,19 +196,23 @@ func (m *Message) UnMarshall(message []byte) {
 		err := binary.Read(buf, binary.BigEndian, &attr.AT)
 		if err != nil {
 			log.Printf("Message#UnMarshall : binary.Read 0 err , err is : %v !", err.Error())
+			return err
 		}
 		err = binary.Read(buf, binary.BigEndian, &attr.AL)
 		if err != nil {
 			log.Printf("Message#UnMarshall : binary.Read 1 err , err is : %v !", err.Error())
+			return err
 		}
 		attr.AL -= 3 //be careful
 		attr.AV = make([]byte, attr.AL)
 		if err := binary.Read(buf, binary.BigEndian, &attr.AV); err != nil {
 			log.Printf("Message#UnMarshall : binary.Read 2 err , err is : %v !", err.Error())
+			return err
 		}
 		m.AttrMaps[attr.AT] = attr.AV
 
 	}
+	return nil
 }
 
 func (m *Message) ForConnCreateDone(body []byte, cliID, cID, sID uint16) {

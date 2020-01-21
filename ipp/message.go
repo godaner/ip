@@ -4,7 +4,7 @@ const (
 	_ = iota
 	// v1 简单的交互，不支持加密等
 	VERSION_V1 = iota
-	// v2 支持md5加密
+	// v2 支持aes加密
 	VERSION_V2 = iota
 )
 
@@ -35,7 +35,7 @@ const (
 )
 
 type Message interface {
-	UnMarshall(message []byte)
+	UnMarshall(message []byte) (err error)
 	Marshall() []byte
 	Type() byte
 	CID() uint16

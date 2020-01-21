@@ -136,25 +136,31 @@ func (m *Message) Marshall() []byte {
 	return buf.Bytes()
 }
 
-func (m *Message) UnMarshall(message []byte) {
+func (m *Message) UnMarshall(message []byte) (err error){
 	buf := bytes.NewBuffer(message)
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HVersion); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HVersion err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HType); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HType err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HSerialNo); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HSerialNo err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HCID); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HCID err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HCliID); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HCliID err , err is : %v !", err.Error())
+		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HAttrNum); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HAttrNum err , err is : %v !", err.Error())
+		return err
 	}
 
 	m.Attr = make([]Attr, m.Header.AttrNum())
@@ -164,19 +170,23 @@ func (m *Message) UnMarshall(message []byte) {
 		err := binary.Read(buf, binary.BigEndian, &attr.AT)
 		if err != nil {
 			log.Printf("Message#UnMarshall : binary.Read 0 err , err is : %v !", err.Error())
+			return err
 		}
 		err = binary.Read(buf, binary.BigEndian, &attr.AL)
 		if err != nil {
 			log.Printf("Message#UnMarshall : binary.Read 1 err , err is : %v !", err.Error())
+			return err
 		}
 		attr.AL -= 3 //be careful
 		attr.AV = make([]byte, attr.AL)
 		if err := binary.Read(buf, binary.BigEndian, &attr.AV); err != nil {
 			log.Printf("Message#UnMarshall : binary.Read 2 err , err is : %v !", err.Error())
+			return err
 		}
 		m.AttrMaps[attr.AT] = attr.AV
 
 	}
+	return nil
 }
 
 func (m *Message) ForConnCreateDone(body []byte, cliID, cID, sID uint16) {

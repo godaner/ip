@@ -2,6 +2,7 @@ package progress
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"github.com/godaner/ip/conn"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
@@ -35,6 +36,11 @@ func (p *Progress) Listen() (err error) {
 	}
 	p.Config = c
 	p.BrowserConnRID = sync.Map{} // map[uint16]net.Conn{}
+
+	//// print info ////
+	i, _ := json.Marshal(p)
+	log.Printf("Progress#Listen : print proxy info , info is : %v !", string(i))
+
 	// listen client conn
 	go func() {
 		addr := ":" + c.LocalPort
@@ -81,7 +87,11 @@ func (p *Progress) receiveClientMsg(c net.Conn) {
 				continue
 			}
 			m := ippnew.NewMessage(p.Config.IPPVersion, ippnew.SetV2Secret(p.Config.V2Secret))
-			m.UnMarshall(bs)
+			err = m.UnMarshall(bs)
+			if err != nil {
+				log.Printf("Progress#receiveClientMsg : UnMarshall proxy err , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , err is : %v !", err)
+				continue
+			}
 			cID := m.CID()
 			sID := m.SerialId()
 			cliID := m.CliID()
