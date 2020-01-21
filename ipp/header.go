@@ -5,5 +5,6 @@ type Header interface {
 	Type() byte
 	CID() uint16
 	SerialNo() uint16
+	CliID() uint16
 	AttrNum() byte
 }

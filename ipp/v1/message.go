@@ -13,7 +13,16 @@ type Header struct {
 	HType     byte
 	HSerialNo uint16
 	HCID      uint16
+	HCliID    uint16
 	HAttrNum  byte
+}
+
+func (h *Header) SerialNo() uint16 {
+	return h.HSerialNo
+}
+
+func (h *Header) CliID() uint16 {
+	return h.HCliID
 }
 
 func (h *Header) Version() byte {
@@ -58,6 +67,10 @@ type Message struct {
 	AttrMaps map[byte][]byte
 }
 
+func (m *Message) CliID() uint16 {
+	return m.Header.HCliID
+}
+
 func (m *Message) SerialId() uint16 {
 	return m.Header.HSerialNo
 }
@@ -95,6 +108,10 @@ func (m *Message) Marshall() []byte {
 	if err != nil {
 		log.Printf("Message#Bytes : binary.Write m.Header.HCID err , err is : %v !", err.Error())
 	}
+	err = binary.Write(buf, binary.BigEndian, m.Header.HCliID)
+	if err != nil {
+		log.Printf("Message#Bytes : binary.Write m.Header.HCliID err , err is : %v !", err.Error())
+	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HAttrNum)
 	if err != nil {
 		log.Printf("Message#Bytes : binary.Write m.Header.AttrNum err , err is : %v !", err.Error())
@@ -131,6 +148,9 @@ func (m *Message) UnMarshall(message []byte) {
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HCID); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HCID err , err is : %v !", err.Error())
 	}
+	if err := binary.Read(buf, binary.BigEndian, &m.Header.HCliID); err != nil {
+		log.Printf("Message#UnMarshall : binary.Readm.Header.HCliID err , err is : %v !", err.Error())
+	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HAttrNum); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HAttrNum err , err is : %v !", err.Error())
 	}
@@ -157,11 +177,11 @@ func (m *Message) UnMarshall(message []byte) {
 	}
 }
 
-func (m *Message) ForConnCreateDone(body []byte, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CREATE_DONE, cID, sID)
+func (m *Message) ForConnCreateDone(body []byte, cliID, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CREATE_DONE, cliID, cID, sID)
 }
-func (m *Message) ForConnCreate(body []byte, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, cID, sID)
+func (m *Message) ForConnCreate(body []byte, cliID, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, cliID, cID, sID)
 	m.Attr = []Attr{
 		{
 			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(body)), AV: body,
@@ -170,20 +190,34 @@ func (m *Message) ForConnCreate(body []byte, cID, sID uint16) {
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
 
-func (m *Message) ForConnClose(body []byte, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CLOSE, cID, sID)
+func (m *Message) ForConnClose(body []byte, cliID, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_CLOSE, cliID, cID, sID)
 }
-func (m *Message) ForHelloReq(body []byte, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_HELLO, cID, sID)
+
+func (m *Message) ForClientHelloReq(port []byte, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CLIENT_HELLO, 0, 0, sID)
 	m.Attr = []Attr{
 		{
-			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(body)), AV: body,
+			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(port)), AV: port,
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
-func (m *Message) ForReq(body []byte, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_REQ, cID, sID)
+
+func (m *Message) ForServerHelloReq(cliID []byte, port []byte, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_PROXY_HELLO, 0, 0, sID)
+	m.Attr = []Attr{
+		{
+			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(port)), AV: port,
+		},
+		{
+			AT: ipp.ATTR_TYPE_CLI_ID, AL: uint16(len(cliID)), AV: cliID,
+		},
+	}
+	m.Header.HAttrNum = byte(len(m.Attr))
+}
+func (m *Message) ForReq(body []byte, cliID, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_REQ, cliID, cID, sID)
 	m.Attr = []Attr{
 		{
 			AT: ipp.ATTR_TYPE_BODY, AL: uint16(len(body)), AV: body,
@@ -192,11 +226,12 @@ func (m *Message) ForReq(body []byte, cID, sID uint16) {
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
 
-func (m *Message) newMessage(typ byte, cID, sID uint16) {
+func (m *Message) newMessage(typ byte, cliID, cID, sID uint16) {
 	header := Header{}
 	header.HVersion = ipp.VERSION_V1
 	header.HType = typ
 	header.HSerialNo = sID
 	header.HCID = cID
+	header.HCliID = cliID
 	m.Header = header
 }
