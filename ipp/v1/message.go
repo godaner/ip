@@ -9,13 +9,19 @@ import (
 
 // Header
 type Header struct {
-	HVersion  byte
-	HType     byte
-	HSerialNo uint16
-	HCID      uint16
-	HCliID    uint16
-	HAttrNum  byte
+	HVersion   byte
+	HType      byte
+	HSerialNo  uint16
+	HCID       uint16
+	HCliID     uint16
+	HErrorCode byte
+	HAttrNum   byte
 }
+
+func (h *Header) ErrorCode() byte {
+	return h.HErrorCode
+}
+
 func (m *Message) Version() byte {
 	return m.Header.HVersion
 }
@@ -69,12 +75,16 @@ type Message struct {
 	AttrMaps map[byte][]byte
 }
 
+func (m *Message) ErrorCode() byte {
+	return m.Header.ErrorCode()
+}
+
 func (m *Message) CliID() uint16 {
-	return m.Header.HCliID
+	return m.Header.CliID()
 }
 
 func (m *Message) SerialId() uint16 {
-	return m.Header.HSerialNo
+	return m.Header.SerialNo()
 }
 
 func (m *Message) AttributeByType(t byte) []byte {
@@ -136,7 +146,7 @@ func (m *Message) Marshall() []byte {
 	return buf.Bytes()
 }
 
-func (m *Message) UnMarshall(message []byte) (err error){
+func (m *Message) UnMarshall(message []byte) (err error) {
 	buf := bytes.NewBuffer(message)
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HVersion); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HVersion err , err is : %v !", err.Error())
@@ -190,10 +200,10 @@ func (m *Message) UnMarshall(message []byte) (err error){
 }
 
 func (m *Message) ForConnCreateDone(body []byte, cliID, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CREATE_DONE, cliID, cID, sID)
+	m.newMessage(ipp.MSG_TYPE_CONN_CREATE_DONE, cliID, cID, sID, 0)
 }
 func (m *Message) ForConnCreate(body []byte, cliID, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, cliID, cID, sID)
+	m.newMessage(ipp.MSG_TYPE_CONN_CREATE, cliID, cID, sID, 0)
 	m.Attr = []Attr{
 		{
 			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(body)), AV: body,
@@ -203,11 +213,11 @@ func (m *Message) ForConnCreate(body []byte, cliID, cID, sID uint16) {
 }
 
 func (m *Message) ForConnClose(body []byte, cliID, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CONN_CLOSE, cliID, cID, sID)
+	m.newMessage(ipp.MSG_TYPE_CONN_CLOSE, cliID, cID, sID, 0)
 }
 
 func (m *Message) ForClientHelloReq(port []byte, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_CLIENT_HELLO, 0, 0, sID)
+	m.newMessage(ipp.MSG_TYPE_CLIENT_HELLO, 0, 0, sID, 0)
 	m.Attr = []Attr{
 		{
 			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(port)), AV: port,
@@ -216,8 +226,8 @@ func (m *Message) ForClientHelloReq(port []byte, sID uint16) {
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
 
-func (m *Message) ForServerHelloReq(cliID []byte, port []byte, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_PROXY_HELLO, 0, 0, sID)
+func (m *Message) ForServerHelloReq(cliID []byte, port []byte, sID uint16, errCode byte) {
+	m.newMessage(ipp.MSG_TYPE_PROXY_HELLO, 0, 0, sID, errCode)
 	m.Attr = []Attr{
 		{
 			AT: ipp.ATTR_TYPE_PORT, AL: uint16(len(port)), AV: port,
@@ -229,7 +239,7 @@ func (m *Message) ForServerHelloReq(cliID []byte, port []byte, sID uint16) {
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
 func (m *Message) ForReq(body []byte, cliID, cID, sID uint16) {
-	m.newMessage(ipp.MSG_TYPE_REQ, cliID, cID, sID)
+	m.newMessage(ipp.MSG_TYPE_REQ, cliID, cID, sID, 0)
 	m.Attr = []Attr{
 		{
 			AT: ipp.ATTR_TYPE_BODY, AL: uint16(len(body)), AV: body,
@@ -238,12 +248,13 @@ func (m *Message) ForReq(body []byte, cliID, cID, sID uint16) {
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
 
-func (m *Message) newMessage(typ byte, cliID, cID, sID uint16) {
+func (m *Message) newMessage(typ byte, cliID, cID, sID uint16, errCode byte) {
 	header := Header{}
 	header.HVersion = ipp.VERSION_V1
 	header.HType = typ
 	header.HSerialNo = sID
 	header.HCID = cID
 	header.HCliID = cliID
+	header.HErrorCode = errCode
 	m.Header = header
 }

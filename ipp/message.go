@@ -34,6 +34,14 @@ const (
 	ATTR_TYPE_CLI_ID = iota
 )
 
+const (
+	_ = iota
+	// brwoser端口被占用
+	ERROR_CODE_BROWSER_PORT_OCUP = iota
+	// 版本不匹配
+	ERROR_CODE_VERSION_NOT_MATCH = iota
+)
+
 type Message interface {
 	UnMarshall(message []byte) (err error)
 	Marshall() []byte
@@ -41,11 +49,12 @@ type Message interface {
 	CID() uint16
 	SerialId() uint16
 	CliID() uint16
+	ErrorCode() byte
 	Version() byte
 	Attribute(int) Attr
 	AttributeByType(byte) []byte
 	ForClientHelloReq(port []byte, sID uint16)
-	ForServerHelloReq(cliID []byte, port []byte, sID uint16)
+	ForServerHelloReq(cliID []byte, port []byte, sID uint16, errCode byte)
 	ForReq(body []byte, cliID, cID, sID uint16)
 	ForConnCreate(body []byte, cliID, cID, sID uint16)
 	ForConnClose(body []byte, cliID, cID, sID uint16)

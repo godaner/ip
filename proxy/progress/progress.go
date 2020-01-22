@@ -320,11 +320,17 @@ func (p *Progress) clientReqHandler(clientConn net.Conn, m ipp.Message) {
 	log.Printf("Progress#clientReqHandler : from client to browser success , cliID is : %v , cID is : %v , sID is : %v , data len is : %v !", cliID, cID, sID, n)
 }
 
+// sayHello
+//  如果port为空，那么代表监听browser失败，port被占用？
 func (p *Progress) sayHello(clientConn net.Conn, port string, sID uint16) {
 	// return client hello
 	cliID := p.newCID()
+	errCode := byte(0)
+	if port == "" {
+		errCode = ipp.ERROR_CODE_BROWSER_PORT_OCUP
+	}
 	m := ippnew.NewMessage(p.Config.IPPVersion, ippnew.SetV2Secret(p.Config.V2Secret))
-	m.ForServerHelloReq([]byte(strconv.FormatInt(int64(cliID), 10)), []byte(port), sID)
+	m.ForServerHelloReq([]byte(strconv.FormatInt(int64(cliID), 10)), []byte(port), sID, errCode)
 	//marshal
 	b := m.Marshall()
 	ippLen := make([]byte, 4, 4)

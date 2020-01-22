@@ -357,6 +357,18 @@ func (p *Client) proxyCloseBrowserConnHandler(cID, sID uint16) {
 //  处理proxy返回的hello信息
 func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 	close(p.proxyHelloSignal)
+	// check err code
+	if m.ErrorCode() == ipp.ERROR_CODE_BROWSER_PORT_OCUP {
+		log.Printf("Client#proxyHelloHandler : receive browser port be occupied err code , cliID is : %v , cID is : %v , sID is : %v , errCode is : %v !", p.cliID, cID, sID, m.ErrorCode())
+		p.setRestartSignal()
+		return
+	}
+	// check err code
+	if m.ErrorCode() == ipp.ERROR_CODE_VERSION_NOT_MATCH {
+		log.Printf("Client#proxyHelloHandler : receive version not match err code , cliID is : %v , cID is : %v , sID is : %v , errCode is : %v !", p.cliID, cID, sID, m.ErrorCode())
+		p.setRestartSignal()
+		return
+	}
 	// get client id from proxy response
 	cliID, err := strconv.ParseInt(string(m.AttributeByType(ipp.ATTR_TYPE_CLI_ID)), 10, 32)
 	if err != nil {
