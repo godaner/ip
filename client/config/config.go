@@ -17,8 +17,6 @@ var (
 
 type Config struct {
 	ProxyAddr string
-	//ClientForwardAddr    string
-	//ClientWannaProxyPort string
 	ClientProxyMapping string
 	IPPVersion         int
 	V2Secret           string

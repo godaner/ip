@@ -7,9 +7,16 @@ import (
 
 // Progress
 type Progress struct {
+	stopSignal chan bool
 }
 
-func (p *Progress) Listen() (err error) {
+func (p *Progress) Stop() (err error) {
+	close(p.stopSignal)
+	return nil
+}
+
+func (p *Progress) Start() (err error) {
+	p.stopSignal = make(chan bool)
 	// log
 	log.SetFlags(log.Lmicroseconds)
 
@@ -32,7 +39,19 @@ func (p *Progress) Listen() (err error) {
 			V2Secret:             c.V2Secret,
 			TempCliID:            cliID,
 		}
-		go client.Start()
+		go func() {
+			err := client.Start()
+			if err != nil {
+				log.Printf("Progress#Start : start client err , client id is : %v , err is : %v !", cliID, err.Error())
+			}
+			select {
+			case <-p.stopSignal:
+				err := client.Stop()
+				if err != nil {
+					log.Printf("Progress#Start : stop client err , client id is : %v , err is : %v !", cliID, err.Error())
+				}
+			}
+		}()
 		cliID++
 	})
 

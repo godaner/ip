@@ -7,9 +7,9 @@ import (
 
 func main() {
 	p := new(progress.Progress)
-	err := p.Listen()
+	err := p.Start()
 	if err != nil {
-		log.Printf("mian : listen err , err is : %v !", err.Error())
+		log.Printf("mian : progress Start err , err is : %v !", err.Error())
 		return
 	}
 	f := make(chan int, 1)
