@@ -1,6 +1,6 @@
 package progress
-
+// Progress
+//  such as console , ui etc.
 type Progress interface {
-	Start() (err error)
-	Stop() (err error)
+	Launch() (err error)
 }

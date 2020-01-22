@@ -1,26 +1,19 @@
-package progress
+package client
 
 import (
-	"github.com/godaner/ip/client/config"
+	"github.com/godaner/ip/endpoint/client"
 	"log"
 )
 
 // Progress
 type Progress struct {
-	stopSignal chan bool
 }
 
-func (p *Progress) Stop() (err error) {
-	close(p.stopSignal)
-	return nil
-}
-
-func (p *Progress) Start() (err error) {
-	p.stopSignal = make(chan bool)
+func (p *Progress) Launch() (err error) {
 	// log
 	log.SetFlags(log.Lmicroseconds)
 
-	c := new(config.Config)
+	c := new(Config)
 	err = c.Load()
 	if err != nil {
 		return err
@@ -31,7 +24,7 @@ func (p *Progress) Start() (err error) {
 	}
 	cliID := uint16(0)
 	clientProxyMappingParser.Range(func(clientWannaProxyPort, clientForwardAddr string) {
-		client := &Client{
+		cli := &client.Client{
 			ProxyAddr:            c.ProxyAddr,
 			IPPVersion:           c.IPPVersion,
 			ClientForwardAddr:    clientForwardAddr,
@@ -40,16 +33,9 @@ func (p *Progress) Start() (err error) {
 			TempCliID:            cliID,
 		}
 		go func() {
-			err := client.Start()
+			err := cli.Start()
 			if err != nil {
 				log.Printf("Progress#Start : start client err , client id is : %v , err is : %v !", cliID, err.Error())
-			}
-			select {
-			case <-p.stopSignal:
-				err := client.Stop()
-				if err != nil {
-					log.Printf("Progress#Start : stop client err , client id is : %v , err is : %v !", cliID, err.Error())
-				}
 			}
 		}()
 		cliID++

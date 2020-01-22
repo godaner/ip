@@ -1,4 +1,4 @@
-package config
+package proxy
 
 import (
 	"errors"
@@ -16,15 +16,14 @@ var (
 )
 
 type Config struct {
-	ProxyAddr string
-	ClientProxyMapping string
-	IPPVersion         int
-	V2Secret           string
+	LocalPort  string
+	IPPVersion int
+	V2Secret   string
 }
 
 func (c *Config) Load() (err error) {
 	flag.BoolVar(&h, "h", false, "this help")
-	flag.StringVar(&config, "c", "./ipclient.ini", "set configuration `file`")
+	flag.StringVar(&config, "c", "./ipproxy.ini", "set configuration `file`")
 	flag.Usage = usage
 	flag.Parse()
 	if h {
@@ -42,18 +41,15 @@ func (c *Config) Load() (err error) {
 		log.Println("Config#Get : get global error :", err)
 		return err
 	}
-	c.ProxyAddr = globalConfig["proxy_addr"]
+	c.LocalPort = globalConfig["loc_port"]
 	c.V2Secret = globalConfig["v2_secret"]
-	//c.ClientForwardAddr = globalConfig["client_forward_addr"]
-	//c.ClientWannaProxyPort = globalConfig["client_wanna_proxy_port"]
-	c.ClientProxyMapping = globalConfig["client_proxy_mapping"]
 	iv, _ := strconv.ParseInt(globalConfig["ipp_version"], 10, 64)
 	c.IPPVersion = int(iv)
 	return nil
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `Usage: ipclient [-h] [-c filename]
+	fmt.Fprintf(os.Stderr, `Usage: ipproxy [-h] [-c filename]
 
 Options:
 `)

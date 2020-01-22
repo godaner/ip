@@ -1,4 +1,4 @@
-package progress
+package client
 
 import (
 	"encoding/binary"
@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	restart_interval = 5
+	restart_interval           = 1
+	wait_server_hello_time_sec = 5
 )
 
 type Client struct {
@@ -34,23 +35,8 @@ type Client struct {
 	proxyHelloSignal     chan bool
 	restartSignal        chan bool
 	stopSignal           chan bool
-	initSignalLock       sync.RWMutex
 }
 
-// initSignal
-//  close old , new signal
-func (p *Client) initSignal(signal chan bool) (newSignal chan bool) {
-	p.initSignalLock.Lock()
-	defer p.initSignalLock.Unlock()
-	if signal != nil {
-		select {
-		case <-signal:
-		default:
-			close(signal)
-		}
-	}
-	return make(chan bool)
-}
 func (p *Client) Start() (err error) {
 	//// init var ////
 	p.stopSignal = p.initSignal(p.stopSignal)
@@ -61,13 +47,20 @@ func (p *Client) Start() (err error) {
 	go func() {
 		for {
 			select {
-			case <-p.restartSignal:
-				log.Printf("Client#Start : we will start the client , cliID is : %v !", p.cliID)
-				go func() {
-					p.listenProxy()
-				}()
+			case <-p.stopSignal:
+				log.Printf("Client#Start : stop the client success , cliID is : %v !", p.cliID)
+				return
 			default:
+				select {
+				case <-p.restartSignal:
+					log.Printf("Client#Start : we will start the client , cliID is : %v !", p.cliID)
+					go func() {
+						p.listenProxy()
+					}()
+				default:
+				}
 			}
+
 			time.Sleep(restart_interval * time.Second)
 		}
 	}()
@@ -75,13 +68,37 @@ func (p *Client) Start() (err error) {
 	return nil
 }
 func (p *Client) Stop() (err error) {
-	<-p.stopSignal
+	log.Printf("Client#Stop : we will stop client , cliID is : %v !", p.cliID)
+	if p.stopSignal == nil {
+		return
+	}
+	select {
+	case <-p.stopSignal:
+	default:
+		close(p.stopSignal)
+	}
 	return nil
+}
+
+// initSignal
+//  close old , new signal
+func (p *Client) initSignal(signal chan bool) (newSignal chan bool) {
+	if signal != nil {
+		select {
+		case <-signal:
+		default:
+			close(signal)
+		}
+	}
+	return make(chan bool)
 }
 
 // setRestartSignal
 //  restart the client
 func (p *Client) setRestartSignal() {
+	if p.restartSignal == nil {
+		p.restartSignal = make(chan bool)
+	}
 	select {
 	case <-p.restartSignal:
 	default:
@@ -110,7 +127,7 @@ func (p *Client) listenProxy() {
 	p.proxyConn.SetCloseTrigger(p.restartSignal, p.stopSignal)
 	p.proxyConn.SetCloseHandler(func(conn net.Conn) {
 		p.setRestartSignal()
-		log.Printf("Client#listenProxy : proxy conn is close , we will restart , cliID is : %v  !", p.cliID)
+		log.Printf("Client#listenProxy : proxy conn is close , cliID is : %v  !", p.cliID)
 	})
 	log.Printf("Client#listenProxy : dial proxy success , cliID is : %v , proxy addr is : %v !", p.cliID, addr)
 
@@ -125,9 +142,9 @@ func (p *Client) listenProxy() {
 		p.proxyHelloSignal = p.initSignal(p.proxyHelloSignal)
 		// check
 		select {
-		case <-time.After(restart_interval * time.Second):
+		case <-time.After(wait_server_hello_time_sec * time.Second):
 			p.setRestartSignal()
-			log.Printf("Client#listenProxy : can't receive proxy hello in %vs , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , cliID is : %v !", restart_interval, p.cliID)
+			log.Printf("Client#listenProxy : can't receive proxy hello in %vs , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , cliID is : %v !", wait_server_hello_time_sec, p.cliID)
 			return
 		case <-p.restartSignal:
 			return

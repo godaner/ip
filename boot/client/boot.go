@@ -1,13 +1,13 @@
 package main
 
 import (
-	"github.com/godaner/ip/proxy/progress"
+	"github.com/godaner/ip/progress/console/client"
 	"log"
 )
 
 func main() {
-	p := new(progress.Progress)
-	err := p.Start()
+	p := new(client.Progress)
+	err := p.Launch()
 	if err != nil {
 		log.Printf("mian : progress Start err , err is : %v !", err.Error())
 		return

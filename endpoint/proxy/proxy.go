@@ -1,4 +1,4 @@
-package progress
+package proxy
 
 import (
 	"encoding/binary"
@@ -28,16 +28,21 @@ type Proxy struct {
 }
 
 func (p *Proxy) Stop() (err error) {
-	close(p.stopSignal)
+	log.Println("Proxy#Stop : we will stop proxy !")
+	if p.stopSignal == nil {
+		return nil
+	}
+	select {
+	case <-p.stopSignal:
+	default:
+		close(p.stopSignal)
+	}
 	return nil
 }
 
 func (p *Proxy) Start() (err error) {
 
 	//// init var ////
-	if p.stopSignal != nil {
-		close(p.stopSignal)
-	}
 	p.stopSignal = make(chan bool)
 
 	//// log ////
@@ -63,6 +68,7 @@ func (p *Proxy) Start() (err error) {
 		// accept conn
 		p.acceptClientConn(cl)
 
+		log.Println("Progress#Start : stop the client success !")
 	}()
 
 	return nil
