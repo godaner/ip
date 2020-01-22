@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	restart_interval           = 1
+	restart_interval           = 5
+	check_stop_interval        = 1
 	wait_server_hello_time_sec = 5
 )
 
@@ -53,15 +54,15 @@ func (p *Client) Start() (err error) {
 			default:
 				select {
 				case <-p.restartSignal:
-					log.Printf("Client#Start : we will start the client , cliID is : %v !", p.cliID)
+					log.Printf("Client#Start : we will start the client in %vs , cliID is : %v !", restart_interval, p.cliID)
+					time.Sleep(restart_interval * time.Second)
 					go func() {
 						p.listenProxy()
 					}()
 				default:
 				}
 			}
-
-			time.Sleep(restart_interval * time.Second)
+			time.Sleep(check_stop_interval * time.Second)
 		}
 	}()
 	p.setRestartSignal()
