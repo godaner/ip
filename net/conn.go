@@ -1,6 +1,7 @@
 package net
 
 import (
+	"log"
 	"net"
 	"sync"
 )
@@ -70,21 +71,24 @@ func (i *IPConn) SetCloseTrigger(triggers ...chan bool) {
 			case <-i.IsClose():
 				return
 			case <-tri:
-				i.close()
+				err := i.Close()
+				if err != nil {
+					log.Printf("IPConn#SetCloseTrigger : close conn err , err is : %v !", err.Error())
+				}
 				return
 			}
 		}()
 	}
 }
 func (i *IPConn) close() {
+	i.Lock()
+	defer i.Unlock()
 	if i.isClose == nil {
 		return
 	}
-	i.Lock()
 	select {
 	case <-i.isClose:
 	default:
 		close(i.isClose)
 	}
-	i.Unlock()
 }

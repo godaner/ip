@@ -3,9 +3,9 @@ package progress
 import (
 	"encoding/binary"
 	"encoding/json"
-	"github.com/godaner/ip/net"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
+	ipnet "github.com/godaner/ip/net"
 	"io"
 	"log"
 	"math"
@@ -27,16 +27,34 @@ type Client struct {
 	ClientWannaProxyPort string
 	TempCliID            uint16
 	V2Secret             string
-	proxyConn            *net.IPConn
-	restartSignal        chan int
+	proxyConn            *ipnet.IPConn
 	forwardConnRID       sync.Map // map[uint16]net.Conn
 	seq                  int32
 	cliID                uint16
 	proxyHelloSignal     chan bool
+	restartSignal        chan bool
+	stopSignal           chan bool
+	initSignalLock       sync.RWMutex
 }
 
+// initSignal
+//  close old , new signal
+func (p *Client) initSignal(signal chan bool) (newSignal chan bool) {
+	p.initSignalLock.Lock()
+	defer p.initSignalLock.Unlock()
+	if signal != nil {
+		select {
+		case <-signal:
+		default:
+			close(signal)
+		}
+	}
+	return make(chan bool)
+}
 func (p *Client) Start() (err error) {
-	p.restartSignal = make(chan int)
+	//// init var ////
+	p.stopSignal = p.initSignal(p.stopSignal)
+	p.restartSignal = p.initSignal(p.restartSignal)
 	// temp client id
 	p.cliID = p.TempCliID
 	// proxy net
@@ -57,8 +75,7 @@ func (p *Client) Start() (err error) {
 	return nil
 }
 func (p *Client) Stop() (err error) {
-	//todo
-	p.setRestartSignal()
+	<-p.stopSignal
 	return nil
 }
 
@@ -74,29 +91,28 @@ func (p *Client) setRestartSignal() {
 func (p *Client) listenProxy() {
 	//// print info ////
 	i, _ := json.Marshal(p)
-	log.Printf("Client#Listen : print client info , cliID is : %v , info is : %v !", p.cliID, string(i))
+	log.Printf("Client#listenProxy : print client info , cliID is : %v , info is : %v !", p.cliID, string(i))
 
 	//// init var ////
 	// reset restart signal
-	p.restartSignal = make(chan int)
 	p.forwardConnRID = sync.Map{}
+	p.restartSignal = p.initSignal(p.restartSignal)
 
-	//// dial proxy net ////
+	//// dial proxy conn ////
 	addr := p.ProxyAddr
 	c, err := net.Dial("tcp", addr)
 	if err != nil {
-		log.Printf("Client#Listen : dial proxy addr err , cliID is : %v , err is : %v !", p.cliID, err)
+		log.Printf("Client#listenProxy : dial proxy addr err , cliID is : %v , err is : %v !", p.cliID, err)
 		p.setRestartSignal()
 		return
 	}
-	p.proxyConn = net.NewIPConn(c)
-	// check proxy net
-	go func() {
-		<-p.proxyConn.IsClose()
-		log.Printf("Client#Listen : proxy net is close , cliID is : %v !", p.cliID)
+	p.proxyConn = ipnet.NewIPConn(c)
+	p.proxyConn.SetCloseTrigger(p.restartSignal, p.stopSignal)
+	p.proxyConn.SetCloseHandler(func(conn net.Conn) {
 		p.setRestartSignal()
-	}()
-	log.Printf("Client#Listen : dial proxy success , cliID is : %v , proxy addr is : %v !", p.cliID, addr)
+		log.Printf("Client#listenProxy : proxy conn is close , we will restart , cliID is : %v  !", p.cliID)
+	})
+	log.Printf("Client#listenProxy : dial proxy success , cliID is : %v , proxy addr is : %v !", p.cliID, addr)
 
 	//// receive proxy msg ////
 	go func() {
@@ -106,14 +122,18 @@ func (p *Client) listenProxy() {
 	//// say hello to proxy ////
 	// wait some time , then check the proxy hello response
 	go func() {
-		p.proxyHelloSignal = make(chan bool)
+		p.proxyHelloSignal = p.initSignal(p.proxyHelloSignal)
 		// check
 		select {
 		case <-time.After(restart_interval * time.Second):
 			p.setRestartSignal()
-			log.Printf("Client#Listen : can't receive proxy hello in %vs , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , cliID is : %v !", restart_interval, p.cliID)
+			log.Printf("Client#listenProxy : can't receive proxy hello in %vs , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , cliID is : %v !", restart_interval, p.cliID)
 			return
 		case <-p.restartSignal:
+			return
+		case <-p.stopSignal:
+			return
+		case <-p.proxyConn.IsClose():
 			return
 		case <-p.proxyHelloSignal:
 			return
@@ -131,10 +151,10 @@ func (p *Client) listenProxy() {
 	b = append(ippLen, b...)
 	_, err = p.proxyConn.Write(b)
 	if err != nil {
-		log.Printf("Client#Listen : say hello to proxy err , cliID is : %v , cID is : %v , sID is : %v , err : %v !", p.cliID, cID, sID, err)
+		log.Printf("Client#listenProxy : say hello to proxy err , cliID is : %v , cID is : %v , sID is : %v , err : %v !", p.cliID, cID, sID, err)
 		return
 	}
-	log.Printf("Client#Listen : say hello to proxy success , cliID is : %v , cID is : %v , sID is : %v , proxy addr is : %v !", p.cliID, cID, sID, addr)
+	log.Printf("Client#listenProxy : say hello to proxy success , cliID is : %v , cID is : %v , sID is : %v , proxy addr is : %v !", p.cliID, cID, sID, addr)
 
 }
 
@@ -143,15 +163,8 @@ func (p *Client) listenProxy() {
 func (p *Client) receiveProxyMsg() {
 	for {
 		select {
-		case <-p.restartSignal:
-			log.Printf("Client#receiveProxyMsg : get client restart signal , will stop read proxy net , cliID is : %v !", p.cliID)
-			err := p.proxyConn.Close()
-			if err != nil {
-				log.Printf("Client#receiveProxyMsg : close proxy net when client restart err , cliID is : %v , err is : %v !", p.cliID, err.Error())
-			}
-			return
 		case <-p.proxyConn.IsClose():
-			log.Printf("Client#receiveProxyMsg : get proxy net close signal , will stop read proxy net , cliID is : %v !", p.cliID)
+			log.Printf("Client#receiveProxyMsg : get proxy conn close signal , will stop read proxy conn , cliID is : %v !", p.cliID)
 			return
 		default:
 			// parse protocol
@@ -182,10 +195,10 @@ func (p *Client) receiveProxyMsg() {
 				log.Printf("Client#receiveProxyMsg : receive proxy hello , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyHelloHandler(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CREATE:
-				log.Printf("Client#receiveProxyMsg : receive proxy net create , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+				log.Printf("Client#receiveProxyMsg : receive proxy conn create , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyCreateBrowserConnHandler(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CLOSE:
-				log.Printf("Client#receiveProxyMsg : receive proxy net close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+				log.Printf("Client#receiveProxyMsg : receive proxy conn close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyCloseBrowserConnHandler(cID, sID)
 			case ipp.MSG_TYPE_REQ:
 				log.Printf("Client#receiveProxyMsg : receive proxy req , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
@@ -207,12 +220,12 @@ func (p *Client) proxyReqHandler(m ipp.Message) {
 	log.Printf("Client#proxyReqHandler : receive proxy req , cliID is : %v , cID is : %v , sID is : %v , len is : %v !", p.cliID, cID, sID, len(b))
 	v, ok := p.forwardConnRID.Load(cID)
 	if !ok {
-		log.Printf("Client#proxyReqHandler : receive proxy req but no forward net find , not ok , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+		log.Printf("Client#proxyReqHandler : receive proxy req but no forward conn find , not ok , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 		return
 	}
 	forwardConn, _ := v.(net.Conn)
 	if forwardConn == nil {
-		log.Printf("Client#proxyReqHandler : receive proxy req but no forward net find , forwardConnis nil , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+		log.Printf("Client#proxyReqHandler : receive proxy req but no forward conn find , forwardConnis nil , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 		return
 	}
 	n, err := forwardConn.Write(b)
@@ -225,30 +238,30 @@ func (p *Client) proxyReqHandler(m ipp.Message) {
 // proxyCreateBrowserConnHandler
 //  处理proxy回复的conn_create信息
 func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
-	//// proxy return browser net create , we should dial forward addr ////
+	//// proxy return browser conn create , we should dial forward addr ////
 	port := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))
-	log.Printf("Client#proxyCreateBrowserConnHandler : accept proxy create browser net , cliID is : %v , cID is : %v , sID is : %v , port is : %v !", p.cliID, cID, sID, port)
+	log.Printf("Client#proxyCreateBrowserConnHandler : accept proxy create browser conn , cliID is : %v , cID is : %v , sID is : %v , port is : %v !", p.cliID, cID, sID, port)
 	forwardAddr := p.ClientForwardAddr
 	c, err := net.Dial("tcp", forwardAddr)
 	if err != nil {
 		// if dial fail , tell proxy to close browser net
-		log.Printf("Client#proxyCreateBrowserConnHandler : after get proxy browser net create , dial forward err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err)
+		log.Printf("Client#proxyCreateBrowserConnHandler : after get proxy browser conn create , dial forward err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err)
 		p.sendForwardConnCloseEvent(cID, sID)
 		return
 	}
-	forwardConn := net.NewIPConn(c)
-	// check forward net
-	go func() {
-		<-forwardConn.IsClose()
-		log.Printf("Client#proxyCreateBrowserConnHandler : forward net is close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+	forwardConn := ipnet.NewIPConn(c)
+	p.forwardConnRID.Store(cID, forwardConn)
+
+	forwardConn.SetCloseTrigger(p.stopSignal, p.restartSignal, p.proxyConn.IsClose())
+	forwardConn.SetCloseHandler(func(conn net.Conn) {
+		log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 		_, ok := p.forwardConnRID.Load(cID)
 		if !ok {
 			return
 		}
 		p.forwardConnRID.Delete(cID)
 		p.sendForwardConnCloseEvent(cID, sID)
-	}()
-	p.forwardConnRID.Store(cID, forwardConn)
+	})
 	log.Printf("Client#proxyCreateBrowserConnHandler : dial forward addr success , cliID is : %v , cID is : %v , sID is : %v , forward local address is : %v , forward remote address is : %v !", p.cliID, cID, sID, forwardConn.LocalAddr(), forwardConn.RemoteAddr())
 
 	//// read forward data ////
@@ -256,23 +269,8 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 	go func() {
 		for {
 			select {
-			case <-p.restartSignal:
-				log.Printf("Client#proxyCreateBrowserConnHandler : get client restart signal , will stop read forward net , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
-				err := forwardConn.Close()
-				if err != nil {
-					log.Printf("Client#proxyCreateBrowserConnHandler : close forward net when client restart err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
-				}
-				return
-			case <-p.proxyConn.IsClose():
-				log.Printf("Client#proxyCreateBrowserConnHandler : get proxy net close signal , will stop read forward net , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
-				err := forwardConn.Close()
-				if err != nil {
-					log.Printf("Client#proxyCreateBrowserConnHandler : close forward net when proxy net close err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
-				}
-				return
 			case <-forwardConn.IsClose():
-				log.Printf("Client#proxyCreateBrowserConnHandler : get forward net close signal , will stop read forward net , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
-				//forwardConn.Close()
+				log.Printf("Client#proxyCreateBrowserConnHandler : get forward conn close signal , will stop read forward conn , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				return
 			default:
 				sID = p.newSerialNo()
@@ -320,7 +318,7 @@ func (p *Client) sendCreateConnDoneEvent(cID, sID uint16) {
 	b = append(ippLen, b...)
 	_, err := p.proxyConn.Write(b)
 	if err != nil {
-		log.Printf("Client#sendForwardConnCloseEvent : notify proxy net close err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
+		log.Printf("Client#sendForwardConnCloseEvent : notify proxy conn close err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
 		return
 	}
 	return
@@ -336,7 +334,7 @@ func (p *Client) sendForwardConnCloseEvent(cID, sID uint16) {
 	b = append(ippLen, b...)
 	_, err := p.proxyConn.Write(b)
 	if err != nil {
-		log.Printf("Client#sendForwardConnCloseEvent : notify proxy net close err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
+		log.Printf("Client#sendForwardConnCloseEvent : notify proxy conn close err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
 		return
 	}
 	return
@@ -355,7 +353,7 @@ func (p *Client) proxyCloseBrowserConnHandler(cID, sID uint16) {
 	p.forwardConnRID.Delete(cID)
 	err := c.Close()
 	if err != nil {
-		log.Printf("Client#proxyCloseBrowserConnHandler : close forward net err , cliID is : %v , cID is : %v , sID is : %v , err : %v !", p.cliID, cID, sID, err.Error())
+		log.Printf("Client#proxyCloseBrowserConnHandler : close forward conn err , cliID is : %v , cID is : %v , sID is : %v , err : %v !", p.cliID, cID, sID, err.Error())
 	}
 }
 
@@ -365,7 +363,7 @@ func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 	close(p.proxyHelloSignal)
 	// check err code
 	if m.ErrorCode() == ipp.ERROR_CODE_BROWSER_PORT_OCUP {
-		log.Printf("Client#proxyHelloHandler : receive browser port be occupied err code , cliID is : %v , cID is : %v , sID is : %v , errCode is : %v !", p.cliID, cID, sID, m.ErrorCode())
+		log.Printf("Client#proxyHelloHandler : receive browser port be occupied err code , we will restart the client , cliID is : %v , cID is : %v , sID is : %v , errCode is : %v !", p.cliID, cID, sID, m.ErrorCode())
 		p.setRestartSignal()
 		return
 	}

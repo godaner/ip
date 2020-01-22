@@ -1,6 +1,7 @@
 package net
 
 import (
+	"log"
 	"net"
 	"sync"
 )
@@ -33,7 +34,7 @@ func (l *IPListener) Accept() (conn net.Conn, err error) {
 	return NewIPConn(conn), err
 }
 func (l *IPListener) Close() (err error) {
-	err = l.Close()
+	err = l.Listener.Close()
 	if err != nil {
 		l.close()
 	}
@@ -66,21 +67,24 @@ func (l *IPListener) SetCloseTrigger(triggers ...chan bool) {
 			case <-l.IsClose():
 				return
 			case <-tri:
-				l.close()
+				err := l.Close()
+				if err != nil {
+					log.Printf("IPListener#SetCloseTrigger : close listener err , err is : %v !", err.Error())
+				}
 				return
 			}
 		}()
 	}
 }
 func (l *IPListener) close() {
+	l.Lock()
+	defer l.Unlock()
 	if l.isClose == nil {
 		return
 	}
-	l.Lock()
 	select {
 	case <-l.isClose:
 	default:
 		close(l.isClose)
 	}
-	l.Unlock()
 }

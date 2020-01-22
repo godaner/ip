@@ -81,6 +81,7 @@ func (p *Proxy) acceptClientConn(cl *ipnet.IPListener) {
 				log.Printf("Proxy#acceptClientConn : accept client conn err , err is : %v !", err.Error())
 				continue
 			}
+			// client conn
 			cc := c.(*ipnet.IPConn)
 			cc.SetCloseTrigger(cl.IsClose(), p.stopSignal)
 			go p.receiveClientMsg(cc)
@@ -208,13 +209,6 @@ func (p *Proxy) listenBrowser(clientConn *ipnet.IPConn, clientWannaProxyPort str
 	}
 	bl := ipnet.NewIPListener(lis)
 	bl.SetCloseTrigger(p.stopSignal, clientConn.IsClose())
-	bl.SetCloseHandler(func(listener net.Listener) {
-		log.Println("Proxy#listenBrowser : close browser listener !")
-		err := listener.Close()
-		if err != nil {
-			log.Printf("Proxy#listenBrowser : close browser listener err , err is : %v !", err.Error())
-		}
-	})
 	log.Printf("Proxy#listenBrowser : listen browser port is : %v !", clientWannaProxyPort)
 	go func() {
 		for {
@@ -240,13 +234,8 @@ func (p *Proxy) listenBrowser(clientConn *ipnet.IPConn, clientWannaProxyPort str
 				bc.SetCloseTrigger(p.stopSignal, bl.IsClose(), clientConn.IsClose())
 				bc.SetCloseHandler(func(conn net.Conn) {
 					log.Println("Proxy#listenBrowser : close browser conn !")
-					err := conn.Close()
-					if err != nil {
-						log.Printf("Proxy#listenBrowser : close browser conn err , err is : %v !", err.Error())
-					}
 					p.browserConnRID.Delete(cID)
 					p.sendBrowserConnCloseEvent(clientConn, cliID, cID, sID)
-
 					return
 				})
 				// rem browser conn and notify client
