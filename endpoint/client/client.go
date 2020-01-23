@@ -3,7 +3,6 @@ package client
 import (
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
 	ipnet "github.com/godaner/ip/net"
@@ -34,10 +33,16 @@ type Client struct {
 	seq                  int32
 	cliID                uint16
 	proxyHelloSignal     chan bool
+	destroySignal        chan bool
 	stopSignal           chan bool
 	startSignal          chan bool
 	isStart              bool
 	sync.Once
+}
+
+func (p *Client) Destroy() error {
+	close(p.destroySignal)
+	return nil
 }
 
 func (p *Client) GetID() (id uint16) {
@@ -53,7 +58,6 @@ func (p *Client) IsStart() bool {
 func (p *Client) Restart() error {
 	p.init()
 	if p.IsStart() {
-		fmt.Println("123132")
 		err := p.Stop()
 		if err != nil {
 			return err
@@ -68,58 +72,77 @@ func (p *Client) Restart() error {
 
 func (p *Client) Start() (err error) {
 	p.init()
-	if p.startSignal == nil {
+	if p.IsStart() {
 		return
 	}
-	select {
-	case <-p.startSignal:
-	default:
-		close(p.startSignal)
+	if p.startSignal == nil {
+		return nil
 	}
-	p.startSignal = make(chan bool)
-	p.isStart = true
+	startSignal := p.startSignal
+	select {
+	case <-startSignal:
+		// already start , never happen
+	default:
+		// omit start signal
+		p.isStart = true
+		p.startSignal = make(chan bool)
+		close(startSignal)
+	}
 	return nil
 }
 func (p *Client) Stop() (err error) {
 	p.init()
-	if p.stopSignal == nil {
+	if !p.IsStart() {
 		return
 	}
-	select {
-	case <-p.stopSignal:
-	default:
-		close(p.stopSignal)
+	if p.stopSignal == nil {
+		return nil
 	}
+	stopSignal := p.stopSignal
+	select {
+	case <-stopSignal:
+		// already stop , never happen
+	default:
+		// omit close signal
+		p.isStart = false
+		p.stopSignal = make(chan bool)
+		close(stopSignal)
 
-	p.stopSignal = make(chan bool)
-	p.isStart = false
+	}
 	return nil
 }
 
 // init
 func (p *Client) init() {
-	p.Once.Do(func() {
+	p.Do(func() {
 		//// init var ////
+		p.destroySignal = make(chan bool)
 		p.stopSignal = make(chan bool)
 		p.startSignal = make(chan bool)
 		// temp client id
 		p.cliID = p.TempCliID
 		// handler
+
 		go func() {
 			for {
 				select {
+				case <-p.destroySignal:
+					log.Printf("Client#init : get destroy the client signal , we will destroy the client, cliID is : %v !", p.cliID)
+					return
 				case <-p.stopSignal: // wanna stop
-					log.Printf("Client#init : stop the client success , cliID is : %v !", p.cliID)
+					log.Printf("Client#init : get stop the client signal , we will stop the client, cliID is : %v !", p.cliID)
 					continue
-
 				}
 			}
 		}()
 		go func() {
 			for {
 				select {
+				case <-p.destroySignal:
+					log.Printf("Client#init : get destroy the client signal , we will destroy the client, cliID is : %v !", p.cliID)
+					return
 				case <-p.startSignal: // wanna start
-					log.Printf("Client#init : we will start the client in %vs , cliID is : %v !", restart_interval, p.cliID)
+					log.Printf("Client#init : get start the client signal , we will start the client in %vs, cliID is : %v !", restart_interval, p.cliID)
 					time.Sleep(restart_interval * time.Second)
 					select {
 					case <-p.stopSignal:
@@ -133,8 +156,9 @@ func (p *Client) init() {
 			}
 		}()
 		// wait the select
-		time.Sleep(1 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	})
+
 }
 
 // closeAndNew
@@ -167,11 +191,23 @@ func (p *Client) listenProxy() {
 		return
 	}
 	p.proxyConn = ipnet.NewIPConn(c)
-	p.proxyConn.SetCloseTrigger(p.stopSignal)
-	p.proxyConn.SetCloseHandler(func(conn net.Conn) {
+	p.proxyConn.AddCloseTrigger(func(conn net.Conn) {
+		log.Printf("Client#listenProxy : proxy conn is close by self , cliID is : %v  !", p.cliID)
 		p.Restart()
-		log.Printf("Client#listenProxy : proxy conn is close , cliID is : %v  !", p.cliID)
+	}, &ipnet.CloseTrigger{
+		Signal: p.stopSignal,
+		Handler: func(conn net.Conn) {
+			log.Printf("Client#listenProxy : proxy conn is close by stopSignal , cliID is : %v  !", p.cliID)
+			p.proxyConn.Close()
+		},
+	}, &ipnet.CloseTrigger{
+		Signal: p.destroySignal,
+		Handler: func(conn net.Conn) {
+			log.Printf("Client#listenProxy : proxy conn is close by destroySignal , cliID is : %v  !", p.cliID)
+			p.proxyConn.Close()
+		},
 	})
+
 	log.Printf("Client#listenProxy : dial proxy success , cliID is : %v , proxy addr is : %v !", p.cliID, addr)
 
 	//// receive proxy msg ////
@@ -186,14 +222,16 @@ func (p *Client) listenProxy() {
 		// check
 		select {
 		case <-time.After(wait_server_hello_time_sec * time.Second):
-			p.Restart()
 			log.Printf("Client#listenProxy : can't receive proxy hello in %vs , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , cliID is : %v !", wait_server_hello_time_sec, p.cliID)
+			p.Restart()
 			return
 		case <-p.stopSignal:
 			return
-		case <-p.proxyConn.IsClose():
+		case <-p.proxyConn.CloseSignal():
 			return
 		case <-p.proxyHelloSignal:
+			return
+		case <-p.destroySignal:
 			return
 		}
 	}()
@@ -221,7 +259,7 @@ func (p *Client) listenProxy() {
 func (p *Client) receiveProxyMsg() {
 	for {
 		select {
-		case <-p.proxyConn.IsClose():
+		case <-p.proxyConn.CloseSignal():
 			log.Printf("Client#receiveProxyMsg : get proxy conn close signal , will stop read proxy conn , cliID is : %v !", p.cliID)
 			return
 		default:
@@ -310,16 +348,52 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 	forwardConn := ipnet.NewIPConn(c)
 	p.forwardConnRID.Store(cID, forwardConn)
 
-	forwardConn.SetCloseTrigger(p.stopSignal, p.proxyConn.IsClose())
-	forwardConn.SetCloseHandler(func(conn net.Conn) {
-		log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+	forwardConn.AddCloseTrigger(func(conn net.Conn) {
+		log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by self , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 		_, ok := p.forwardConnRID.Load(cID)
 		if !ok {
 			return
 		}
 		p.forwardConnRID.Delete(cID)
 		p.sendForwardConnCloseEvent(cID, sID)
+	}, &ipnet.CloseTrigger{
+		Signal: p.stopSignal,
+		Handler: func(conn net.Conn) {
+			log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by stopSignal , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+			_, ok := p.forwardConnRID.Load(cID)
+			if !ok {
+				return
+			}
+			p.forwardConnRID.Delete(cID)
+			p.sendForwardConnCloseEvent(cID, sID)
+			forwardConn.Close()
+		},
+	}, &ipnet.CloseTrigger{
+		Signal: p.destroySignal,
+		Handler: func(conn net.Conn) {
+			log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by destroySignal , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+			_, ok := p.forwardConnRID.Load(cID)
+			if !ok {
+				return
+			}
+			p.forwardConnRID.Delete(cID)
+			p.sendForwardConnCloseEvent(cID, sID)
+			forwardConn.Close()
+		},
+	}, &ipnet.CloseTrigger{
+		Signal: p.proxyConn.CloseSignal(),
+		Handler: func(conn net.Conn) {
+			log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by proxyConn.CloseSignal , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+			_, ok := p.forwardConnRID.Load(cID)
+			if !ok {
+				return
+			}
+			p.forwardConnRID.Delete(cID)
+			p.sendForwardConnCloseEvent(cID, sID)
+			forwardConn.Close()
+		},
 	})
+
 	log.Printf("Client#proxyCreateBrowserConnHandler : dial forward addr success , cliID is : %v , cID is : %v , sID is : %v , forward local address is : %v , forward remote address is : %v !", p.cliID, cID, sID, forwardConn.LocalAddr(), forwardConn.RemoteAddr())
 
 	//// read forward data ////
@@ -327,7 +401,7 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 	go func() {
 		for {
 			select {
-			case <-forwardConn.IsClose():
+			case <-forwardConn.CloseSignal():
 				log.Printf("Client#proxyCreateBrowserConnHandler : get forward conn close signal , will stop read forward conn , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				return
 			default:
