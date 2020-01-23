@@ -1,61 +1,52 @@
 package client
 
 import (
-	"errors"
 	"flag"
-	"fmt"
 	conf "github.com/Unknwon/goconfig"
 	"log"
-	"os"
 	"strconv"
-)
-
-var (
-	h      bool
-	config string
+	"sync"
 )
 
 type Config struct {
-	ProxyAddr string
-	ClientProxyMapping string
-	IPPVersion         int
-	V2Secret           string
+	config                   string
+	ProxyAddr                string
+	IPPVersion               int
+	V2Secret                 string
+	ClientProxyMappingParser *ClientProxyMappingParser
+	sync.Once
 }
 
 func (c *Config) Load() (err error) {
-	flag.BoolVar(&h, "h", false, "this help")
-	flag.StringVar(&config, "c", "./ipclient.ini", "set configuration `file`")
-	flag.Usage = usage
-	flag.Parse()
-	if h {
-		flag.Usage()
-		return errors.New("help you")
-	}
-	confo, err := conf.LoadConfigFile(config)
+	c.Once.Do(func() {
+		flag.StringVar(&c.config, "c", "./ipclient.ini", "set configuration `file`")
+		flag.Parse()
+	})
+	confo, err := conf.LoadConfigFile(c.config)
 	if err != nil {
-		log.Println("Config#Get : load config file error :", err)
+		log.Println("Config#Load : load config file error :", err)
 		return err
 	}
 
 	globalConfig, err := confo.GetSection("global")
 	if err != nil {
-		log.Println("Config#Get : get global error :", err)
+		log.Println("Config#Load : get global error :", err)
 		return err
 	}
+	// proxy_addr
 	c.ProxyAddr = globalConfig["proxy_addr"]
+
+	// v2_secret
 	c.V2Secret = globalConfig["v2_secret"]
-	//c.ClientForwardAddr = globalConfig["client_forward_addr"]
-	//c.ClientWannaProxyPort = globalConfig["client_wanna_proxy_port"]
-	c.ClientProxyMapping = globalConfig["client_proxy_mapping"]
+
+	// ipp_version
 	iv, _ := strconv.ParseInt(globalConfig["ipp_version"], 10, 64)
 	c.IPPVersion = int(iv)
+
+	// client_proxy_mapping
+	c.ClientProxyMappingParser = &ClientProxyMappingParser{
+		ClientProxyMappingSource: globalConfig["client_proxy_mapping"],
+	}
+
 	return nil
-}
-
-func usage() {
-	fmt.Fprintf(os.Stderr, `Usage: ipclient [-h] [-c filename]
-
-Options:
-`)
-	flag.PrintDefaults()
 }

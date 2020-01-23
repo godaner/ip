@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
 	ipnet "github.com/godaner/ip/net"
@@ -18,7 +19,6 @@ import (
 
 const (
 	restart_interval           = 5
-	check_stop_interval        = 1
 	wait_server_hello_time_sec = 5
 )
 
@@ -34,42 +34,54 @@ type Client struct {
 	seq                  int32
 	cliID                uint16
 	proxyHelloSignal     chan bool
-	restartSignal        chan bool
 	stopSignal           chan bool
+	startSignal          chan bool
+	isStart              bool
+	sync.Once
+}
+
+func (p *Client) GetID() (id uint16) {
+	p.init()
+	return p.cliID
+}
+
+func (p *Client) IsStart() bool {
+	p.init()
+	return p.isStart
+}
+
+func (p *Client) Restart() error {
+	p.init()
+	if p.IsStart() {
+		fmt.Println("123132")
+		err := p.Stop()
+		if err != nil {
+			return err
+		}
+	}
+	err := p.Start()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (p *Client) Start() (err error) {
-	//// init var ////
-	p.stopSignal = p.initSignal(p.stopSignal)
-	p.restartSignal = p.initSignal(p.restartSignal)
-	// temp client id
-	p.cliID = p.TempCliID
-	// proxy net
-	go func() {
-		for {
-			select {
-			case <-p.stopSignal:
-				log.Printf("Client#Start : stop the client success , cliID is : %v !", p.cliID)
-				return
-			default:
-				select {
-				case <-p.restartSignal:
-					log.Printf("Client#Start : we will start the client in %vs , cliID is : %v !", restart_interval, p.cliID)
-					time.Sleep(restart_interval * time.Second)
-					go func() {
-						p.listenProxy()
-					}()
-				default:
-				}
-			}
-			time.Sleep(check_stop_interval * time.Second)
-		}
-	}()
-	p.setRestartSignal()
+	p.init()
+	if p.startSignal == nil {
+		return
+	}
+	select {
+	case <-p.startSignal:
+	default:
+		close(p.startSignal)
+	}
+	p.startSignal = make(chan bool)
+	p.isStart = true
 	return nil
 }
 func (p *Client) Stop() (err error) {
-	log.Printf("Client#Stop : we will stop client , cliID is : %v !", p.cliID)
+	p.init()
 	if p.stopSignal == nil {
 		return
 	}
@@ -78,12 +90,56 @@ func (p *Client) Stop() (err error) {
 	default:
 		close(p.stopSignal)
 	}
+
+	p.stopSignal = make(chan bool)
+	p.isStart = false
 	return nil
 }
 
-// initSignal
+// init
+func (p *Client) init() {
+	p.Once.Do(func() {
+		//// init var ////
+		p.stopSignal = make(chan bool)
+		p.startSignal = make(chan bool)
+		// temp client id
+		p.cliID = p.TempCliID
+		// handler
+		go func() {
+			for {
+				select {
+				case <-p.stopSignal: // wanna stop
+					log.Printf("Client#init : stop the client success , cliID is : %v !", p.cliID)
+					continue
+
+				}
+			}
+		}()
+		go func() {
+			for {
+				select {
+				case <-p.startSignal: // wanna start
+					log.Printf("Client#init : we will start the client in %vs , cliID is : %v !", restart_interval, p.cliID)
+					time.Sleep(restart_interval * time.Second)
+					select {
+					case <-p.stopSignal:
+						log.Printf("Client#init : when we wanna start client , but get stop signal , so stop the client , cliID is : %v !", p.cliID)
+						continue
+					default:
+						go p.listenProxy()
+						continue
+					}
+				}
+			}
+		}()
+		// wait the select
+		time.Sleep(1 * time.Second)
+	})
+}
+
+// closeAndNew
 //  close old , new signal
-func (p *Client) initSignal(signal chan bool) (newSignal chan bool) {
+func (p *Client) closeAndNew(signal chan bool) (newSignal chan bool) {
 	if signal != nil {
 		select {
 		case <-signal:
@@ -93,41 +149,27 @@ func (p *Client) initSignal(signal chan bool) (newSignal chan bool) {
 	}
 	return make(chan bool)
 }
-
-// setRestartSignal
-//  restart the client
-func (p *Client) setRestartSignal() {
-	if p.restartSignal == nil {
-		p.restartSignal = make(chan bool)
-	}
-	select {
-	case <-p.restartSignal:
-	default:
-		close(p.restartSignal)
-	}
-}
 func (p *Client) listenProxy() {
 	//// print info ////
 	i, _ := json.Marshal(p)
-	log.Printf("Client#listenProxy : print client info , cliID is : %v , info is : %v !", p.cliID, string(i))
+	log.Printf("Client#listenProxy : start listen proxy , print client info , cliID is : %v , info is : %v !", p.cliID, string(i))
 
 	//// init var ////
 	// reset restart signal
 	p.forwardConnRID = sync.Map{}
-	p.restartSignal = p.initSignal(p.restartSignal)
 
 	//// dial proxy conn ////
 	addr := p.ProxyAddr
 	c, err := net.Dial("tcp", addr)
 	if err != nil {
 		log.Printf("Client#listenProxy : dial proxy addr err , cliID is : %v , err is : %v !", p.cliID, err)
-		p.setRestartSignal()
+		p.Restart()
 		return
 	}
 	p.proxyConn = ipnet.NewIPConn(c)
-	p.proxyConn.SetCloseTrigger(p.restartSignal, p.stopSignal)
+	p.proxyConn.SetCloseTrigger(p.stopSignal)
 	p.proxyConn.SetCloseHandler(func(conn net.Conn) {
-		p.setRestartSignal()
+		p.Restart()
 		log.Printf("Client#listenProxy : proxy conn is close , cliID is : %v  !", p.cliID)
 	})
 	log.Printf("Client#listenProxy : dial proxy success , cliID is : %v , proxy addr is : %v !", p.cliID, addr)
@@ -140,14 +182,12 @@ func (p *Client) listenProxy() {
 	//// say hello to proxy ////
 	// wait some time , then check the proxy hello response
 	go func() {
-		p.proxyHelloSignal = p.initSignal(p.proxyHelloSignal)
+		p.proxyHelloSignal = p.closeAndNew(p.proxyHelloSignal)
 		// check
 		select {
 		case <-time.After(wait_server_hello_time_sec * time.Second):
-			p.setRestartSignal()
+			p.Restart()
 			log.Printf("Client#listenProxy : can't receive proxy hello in %vs , some reasons as follow : 1. maybe client's ipp version is diff from proxy , 2. maybe client's ippv2 secret is diff from proxy , 3. maybe the data sent to proxy is not right , cliID is : %v !", wait_server_hello_time_sec, p.cliID)
-			return
-		case <-p.restartSignal:
 			return
 		case <-p.stopSignal:
 			return
@@ -270,7 +310,7 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 	forwardConn := ipnet.NewIPConn(c)
 	p.forwardConnRID.Store(cID, forwardConn)
 
-	forwardConn.SetCloseTrigger(p.stopSignal, p.restartSignal, p.proxyConn.IsClose())
+	forwardConn.SetCloseTrigger(p.stopSignal, p.proxyConn.IsClose())
 	forwardConn.SetCloseHandler(func(conn net.Conn) {
 		log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 		_, ok := p.forwardConnRID.Load(cID)
@@ -382,20 +422,20 @@ func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 	// check err code
 	if m.ErrorCode() == ipp.ERROR_CODE_BROWSER_PORT_OCUP {
 		log.Printf("Client#proxyHelloHandler : receive browser port be occupied err code , we will restart the client , cliID is : %v , cID is : %v , sID is : %v , errCode is : %v !", p.cliID, cID, sID, m.ErrorCode())
-		p.setRestartSignal()
+		p.Restart()
 		return
 	}
 	// check err code
 	if m.ErrorCode() == ipp.ERROR_CODE_VERSION_NOT_MATCH {
 		log.Printf("Client#proxyHelloHandler : receive version not match err code , cliID is : %v , cID is : %v , sID is : %v , errCode is : %v !", p.cliID, cID, sID, m.ErrorCode())
-		p.setRestartSignal()
+		p.Restart()
 		return
 	}
 	// get client id from proxy response
 	cliID, err := strconv.ParseInt(string(m.AttributeByType(ipp.ATTR_TYPE_CLI_ID)), 10, 32)
 	if err != nil {
 		log.Printf("Client#proxyHelloHandler : accept proxy hello , parse cliID err , cliID is : %v , cID is : %v , sID is : %v , err is : %v !", p.cliID, cID, sID, err.Error())
-		p.setRestartSignal()
+		p.Restart()
 		return
 	}
 	p.cliID = uint16(cliID)
@@ -403,7 +443,7 @@ func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 	// check version
 	if m.Version() != byte(p.IPPVersion) {
 		log.Printf("Client#proxyHelloHandler : accept proxy hello , but ipp version is not right , proxy version is : %v , client version is :%v , cliID is : %v , cID is : %v , sID is : %v !", m.Version(), p.IPPVersion, p.cliID, cID, sID)
-		p.setRestartSignal()
+		p.Restart()
 		return
 	}
 
@@ -411,7 +451,7 @@ func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 	port := string(m.AttributeByType(ipp.ATTR_TYPE_PORT))
 	if port != p.ClientWannaProxyPort {
 		log.Printf("Client#proxyHelloHandler : maybe listen port in porxy side be occupied , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
-		p.setRestartSignal()
+		p.Restart()
 		return
 	}
 	log.Printf("Client#proxyHelloHandler : accept proxy hello , and listen port success in porxy side , cliID is : %v , port is : %v , cID is : %v , sID is : %v !", p.cliID, port, cID, sID)

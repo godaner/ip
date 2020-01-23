@@ -27,6 +27,18 @@ type Proxy struct {
 	stopSignal     chan bool
 }
 
+func (p *Proxy) Restart() error {
+	err := p.Stop()
+	if err != nil {
+		return err
+	}
+	err = p.Start()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (p *Proxy) Stop() (err error) {
 	log.Println("Proxy#Stop : we will stop proxy !")
 	if p.stopSignal == nil {

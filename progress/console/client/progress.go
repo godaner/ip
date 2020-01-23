@@ -18,28 +18,23 @@ func (p *Progress) Launch() (err error) {
 	if err != nil {
 		return err
 	}
-	// parse client proxy mapping parser
-	clientProxyMappingParser := ClientProxyMappingParser{
-		ClientProxyMappingSource: c.ClientProxyMapping,
-	}
 	cliID := uint16(0)
-	clientProxyMappingParser.Range(func(clientWannaProxyPort, clientForwardAddr string) {
+	c.ClientProxyMappingParser.Range(func(clientWannaProxyPort, clientForwardAddr string) {
 		cli := &client.Client{
 			ProxyAddr:            c.ProxyAddr,
 			IPPVersion:           c.IPPVersion,
 			ClientForwardAddr:    clientForwardAddr,
 			ClientWannaProxyPort: clientWannaProxyPort,
-			V2Secret:             c.V2Secret,
 			TempCliID:            cliID,
+			V2Secret:             c.V2Secret,
 		}
+		cliID++
 		go func() {
-			err := cli.Start()
+			err := cli.Restart()
 			if err != nil {
-				log.Printf("Progress#Start : start client err , client id is : %v , err is : %v !", cliID, err.Error())
+				log.Printf("Progress#Launch : restart client err , client id is : %v , err is : %v !", cliID, err.Error())
 			}
 		}()
-		cliID++
 	})
-
 	return nil
 }
