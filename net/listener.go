@@ -15,6 +15,7 @@ type IPListener struct {
 	net.Listener
 	isClose chan bool
 	sync.Mutex
+	sync.Once
 	closeHandlers []ListenerCloseHandler
 }
 
@@ -23,60 +24,83 @@ func NewIPListener(lis net.Listener) *IPListener {
 		Listener: lis,
 	}
 }
-
-// Accept
-//  return IPConn
 func (l *IPListener) Accept() (conn net.Conn, err error) {
 	conn, err = l.Listener.Accept()
 	if err != nil {
-		l.close()
+		l.omitCloseSignal()
 	}
 	return NewIPConn(conn), err
 }
+func (l *IPListener) init() {
+	l.Do(func() {
+		l.isClose = make(chan bool)
+	})
+}
+
+// Accept
+//  return IPConn
 func (l *IPListener) Close() (err error) {
 	err = l.Listener.Close()
 	if err != nil {
-		l.close()
+		l.omitCloseSignal()
 	}
 	return err
 }
-func (l *IPListener) IsClose() (c chan bool) {
-	if l.isClose == nil {
-		l.isClose = make(chan bool)
-	}
+
+func (l *IPListener) CloseSignal() (c chan bool) {
+	l.init()
 	return l.isClose
 }
-func (l *IPListener) SetCloseHandler(closeHandler ListenerCloseHandler) {
-	if len(l.closeHandlers) <= 0 {
-		l.closeHandlers = []ListenerCloseHandler{}
-	}
-	l.closeHandlers = append(l.closeHandlers, closeHandler)
+
+type ListenerCloseTrigger struct {
+	Signal  chan bool
+	Handler ListenerCloseHandler
+}
+
+func (l *IPListener) AddCloseTrigger(selfCloseHandler ListenerCloseHandler, triggers ...*ListenerCloseTrigger) {
+	l.init()
+	over := make(chan bool)
 	go func() {
 		select {
-		case <-l.IsClose():
-			closeHandler(l)
+		case <-over:
+			return
+		case <-l.CloseSignal():
+			select {
+			case <-over:
+			default:
+				close(over)
+			}
+			if selfCloseHandler != nil {
+				selfCloseHandler(l)
+			}
 		}
 	}()
-
-}
-func (l *IPListener) SetCloseTrigger(triggers ...chan bool) {
 	for _, t := range triggers {
 		tri := t
 		go func() {
 			select {
-			case <-l.IsClose():
+			case <-over:
 				return
-			case <-tri:
+			case <-tri.Signal:
+				select {
+				case <-over:
+				default:
+					close(over)
+				}
+				if tri.Handler != nil {
+					tri.Handler(l)
+				}
 				err := l.Close()
 				if err != nil {
-					log.Printf("IPListener#SetCloseTrigger : close listener err , err is : %v !", err.Error())
+					log.Printf("IPListener#SetCloseTrigger : close conn err , err is : %v !", err.Error())
 				}
 				return
 			}
 		}()
 	}
 }
-func (l *IPListener) close() {
+func (l *IPListener) omitCloseSignal() {
+	l.init()
 	l.Lock()
 	defer l.Unlock()
 	if l.isClose == nil {

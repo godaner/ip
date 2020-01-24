@@ -18,21 +18,47 @@ import (
 	"time"
 )
 
+const (
+	restart_interval           = 5
+	wait_server_hello_time_sec = 5
+)
+
 type Proxy struct {
 	LocalPort      string
 	IPPVersion     int
 	V2Secret       string
 	browserConnRID sync.Map // map[uint16]net.Conn
 	seq            int32
+	destroySignal  chan bool
 	stopSignal     chan bool
+	startSignal    chan bool
+	isStart        bool
+	sync.Once
+}
+
+func (p *Proxy) IsStart() bool {
+	p.init()
+	return p.isStart
+}
+
+func (p *Proxy) Destroy() error {
+	close(p.destroySignal)
+	return nil
+}
+
+func (p *Proxy) GetID() uint16 {
+	return 0
 }
 
 func (p *Proxy) Restart() error {
-	err := p.Stop()
-	if err != nil {
-		return err
+	p.init()
+	if p.IsStart() {
+		err := p.Stop()
+		if err != nil {
+			return err
+		}
 	}
-	err = p.Start()
+	err := p.Start()
 	if err != nil {
 		return err
 	}
@@ -40,57 +66,139 @@ func (p *Proxy) Restart() error {
 }
 
 func (p *Proxy) Stop() (err error) {
-	log.Println("Proxy#Stop : we will stop proxy !")
+	p.init()
+	if !p.IsStart() {
+		return
+	}
 	if p.stopSignal == nil {
 		return nil
 	}
+	stopSignal := p.stopSignal
 	select {
-	case <-p.stopSignal:
+	case <-stopSignal:
+		// already stop , never happen
 	default:
-		close(p.stopSignal)
+		// omit close signal
+		p.isStart = false
+		p.stopSignal = make(chan bool)
+		close(stopSignal)
+
 	}
 	return nil
 }
 
 func (p *Proxy) Start() (err error) {
+	p.init()
+	if p.IsStart() {
+		return
+	}
+	if p.startSignal == nil {
+		return nil
+	}
+	startSignal := p.startSignal
+	select {
+	case <-startSignal:
+		// already start , never happen
+	default:
+		// omit start signal
+		p.isStart = true
+		p.startSignal = make(chan bool)
+		close(startSignal)
+	}
+	return nil
+}
 
-	//// init var ////
-	p.stopSignal = make(chan bool)
+// init
+func (p *Proxy) init() {
+	p.Do(func() {
+		//// init var ////
+		p.destroySignal = make(chan bool)
+		p.stopSignal = make(chan bool)
+		p.startSignal = make(chan bool)
 
-	//// log ////
-	log.SetFlags(log.Lmicroseconds)
-	p.browserConnRID = sync.Map{} // map[uint16]net.Conn{}
+		//// log ////
+		p.browserConnRID = sync.Map{} // map[uint16]net.Conn{}
+		go func() {
+			for {
+				select {
+				case <-p.destroySignal:
+					log.Printf("Proxy#init : get destroy the proxy signal , we will destroy the proxy !")
+					return
+				case <-p.stopSignal:
+					log.Printf("Proxy#init : get stop the proxy signal , we will stop the proxy !")
+					continue
+				}
+			}
+		}()
+		go func() {
+			for {
+				select {
+				case <-p.destroySignal:
+					log.Printf("Proxy#init : get destroy the proxy signal , we will destroy the proxy !")
+					return
+				case <-p.startSignal: // wanna start
+					log.Printf("Proxy#init : get start the proxy signal , we will start the proxy in %vs !", restart_interval)
+					time.Sleep(restart_interval * time.Second)
+					select {
+					case <-p.stopSignal:
+						log.Printf("Proxy#init : when we wanna start proxy , but get stop signal , so stop the proxy !")
+						continue
+					default:
+						go p.startListen()
+						continue
+					}
+				}
+			}
+		}()
 
+		// wait the select
+		time.Sleep(500 * time.Millisecond)
+	})
+
+}
+func (p *Proxy) startListen() {
 	//// print info ////
 	i, _ := json.Marshal(p)
-	log.Printf("Proxy#Start : print proxy info , info is : %v !", string(i))
-
+	log.Printf("Proxy#startListen : print proxy info , info is : %v !", string(i))
 	//// listen client conn ////
 	go func() {
 		// lis
 		addr := ":" + p.LocalPort
 		lis, err := net.Listen("tcp", addr)
 		if err != nil {
-			panic(err)
+			p.Restart()
+			return
 		}
 		cl := ipnet.NewIPListener(lis)
-		cl.SetCloseTrigger(p.stopSignal)
-		log.Printf("Proxy#Start : local addr is : %v !", addr)
+		cl.AddCloseTrigger(func(listener net.Listener) {
+			log.Printf("Proxy#startListen : client listener close by self !")
+		}, &ipnet.ListenerCloseTrigger{
+			Signal: p.stopSignal,
+			Handler: func(listener net.Listener) {
+				log.Printf("Proxy#startListen : client listener close by stopSignal !")
+				listener.Close()
+			},
+		}, &ipnet.ListenerCloseTrigger{
+			Signal: p.destroySignal,
+			Handler: func(listener net.Listener) {
+				log.Printf("Proxy#startListen : client listener close by destroySignal !")
+				listener.Close()
+			},
+		})
+		log.Printf("Proxy#startListen : local addr is : %v !", addr)
 
 		// accept conn
 		p.acceptClientConn(cl)
 
-		log.Println("Progress#Start : stop the client success !")
+		log.Println("Progress#startListen : stop the client success !")
 	}()
-
-	return nil
 }
 
 // acceptClientConn
 func (p *Proxy) acceptClientConn(cl *ipnet.IPListener) {
 	for {
 		select {
-		case <-cl.IsClose():
+		case <-cl.CloseSignal():
 			log.Println("Proxy#acceptClientConn : stop client accept !")
 			return
 		default:
@@ -101,7 +209,27 @@ func (p *Proxy) acceptClientConn(cl *ipnet.IPListener) {
 			}
 			// client conn
 			cc := c.(*ipnet.IPConn)
-			cc.SetCloseTrigger(cl.IsClose(), p.stopSignal)
+			cc.AddCloseTrigger(func(conn net.Conn) {
+				log.Printf("Proxy#acceptClientConn : client conn close by self !")
+			}, &ipnet.ConnCloseTrigger{
+				Signal: cl.CloseSignal(),
+				Handler: func(conn net.Conn) {
+					log.Printf("Proxy#acceptClientConn : client conn close by client listener closeSignal !")
+					conn.Close()
+				},
+			}, &ipnet.ConnCloseTrigger{
+				Signal: p.stopSignal,
+				Handler: func(conn net.Conn) {
+					log.Printf("Proxy#acceptClientConn : client conn close by client stopSignal !")
+					conn.Close()
+				},
+			}, &ipnet.ConnCloseTrigger{
+				Signal: p.destroySignal,
+				Handler: func(conn net.Conn) {
+					log.Printf("Proxy#acceptClientConn : client conn close by client destroySignal !")
+					conn.Close()
+				},
+			})
 			go p.receiveClientMsg(cc)
 		}
 	}
@@ -112,7 +240,7 @@ func (p *Proxy) acceptClientConn(cl *ipnet.IPListener) {
 func (p *Proxy) receiveClientMsg(clientConn *ipnet.IPConn) {
 	for {
 		select {
-		case <-clientConn.IsClose():
+		case <-clientConn.CloseSignal():
 			log.Println("Proxy#receiveClientMsg : get client conn close signal , we will stop read client conn !")
 			return
 		default:
@@ -226,16 +354,33 @@ func (p *Proxy) listenBrowser(clientConn *ipnet.IPConn, clientWannaProxyPort str
 		return err
 	}
 	bl := ipnet.NewIPListener(lis)
-	bl.SetCloseTrigger(p.stopSignal, clientConn.IsClose())
+	bl.AddCloseTrigger(func(listener net.Listener) {
+		log.Printf("Proxy#listenBrowser : browser listener close by self !")
+	}, &ipnet.ListenerCloseTrigger{
+		Signal: p.stopSignal,
+		Handler: func(listener net.Listener) {
+			log.Printf("Proxy#listenBrowser : browser listener close by stopSignal !")
+			bl.Close()
+		},
+	}, &ipnet.ListenerCloseTrigger{
+		Signal: clientConn.CloseSignal(),
+		Handler: func(listener net.Listener) {
+			log.Printf("Proxy#listenBrowser : browser listener close by client conn closeSignal !")
+			bl.Close()
+		},
+	}, &ipnet.ListenerCloseTrigger{
+		Signal: p.destroySignal,
+		Handler: func(listener net.Listener) {
+			log.Printf("Proxy#listenBrowser : browser listener close by destroySignal !")
+			bl.Close()
+		},
+	})
 	log.Printf("Proxy#listenBrowser : listen browser port is : %v !", clientWannaProxyPort)
 	go func() {
 		for {
 			select {
-			case <-clientConn.IsClose():
-				log.Println("Proxy#listenBrowser : get browser conn close signal , we will stop accept browser conn !")
-				return
-			case <-p.stopSignal:
-				log.Println("Proxy#listenBrowser : get browser conn close signal , we will stop accept browser conn !")
+			case <-bl.CloseSignal():
+				log.Println("Proxy#listenBrowser : get browser listener close signal , we will stop accept browser conn !")
 				return
 			default:
 				// when listener stop , we stop accept
@@ -249,12 +394,43 @@ func (p *Proxy) listenBrowser(clientConn *ipnet.IPConn, clientWannaProxyPort str
 				sID := p.newSerialNo()
 				// trans to ip net
 				bc := ipnet.NewIPConn(c)
-				bc.SetCloseTrigger(p.stopSignal, bl.IsClose(), clientConn.IsClose())
-				bc.SetCloseHandler(func(conn net.Conn) {
-					log.Println("Proxy#listenBrowser : close browser conn !")
+				bc.AddCloseTrigger(func(conn net.Conn) {
+					log.Println("Proxy#listenBrowser : browser conn close by self !")
 					p.browserConnRID.Delete(cID)
 					p.sendBrowserConnCloseEvent(clientConn, cliID, cID, sID)
 					return
+				}, &ipnet.ConnCloseTrigger{
+					Signal: p.stopSignal,
+					Handler: func(conn net.Conn) {
+						log.Println("Proxy#listenBrowser : browser conn close by stopSignal !")
+						p.browserConnRID.Delete(cID)
+						p.sendBrowserConnCloseEvent(clientConn, cliID, cID, sID)
+						return
+					},
+				}, &ipnet.ConnCloseTrigger{
+					Signal: p.destroySignal,
+					Handler: func(conn net.Conn) {
+						log.Println("Proxy#listenBrowser : browser conn close by destroySignal !")
+						p.browserConnRID.Delete(cID)
+						p.sendBrowserConnCloseEvent(clientConn, cliID, cID, sID)
+						return
+					},
+				}, &ipnet.ConnCloseTrigger{
+					Signal: bl.CloseSignal(),
+					Handler: func(conn net.Conn) {
+						log.Println("Proxy#listenBrowser : browser conn close by browser listener closeSignal !")
+						p.browserConnRID.Delete(cID)
+						p.sendBrowserConnCloseEvent(clientConn, cliID, cID, sID)
+						return
+					},
+				}, &ipnet.ConnCloseTrigger{
+					Signal: clientConn.CloseSignal(),
+					Handler: func(conn net.Conn) {
+						log.Println("Proxy#listenBrowser : browser conn close by client conn closeSignal !")
+						p.browserConnRID.Delete(cID)
+						p.sendBrowserConnCloseEvent(clientConn, cliID, cID, sID)
+						return
+					},
 				})
 				// rem browser conn and notify client
 				p.browserConnRID.Store(cID, bc)
@@ -282,7 +458,7 @@ func (p *Proxy) clientConnCreateDoneHandler(clientConn *ipnet.IPConn, cliID, cID
 	go func() {
 		for {
 			select {
-			case <-browserConn.IsClose():
+			case <-browserConn.CloseSignal():
 				log.Printf("Proxy#clientConnCreateDoneHandler : get browser conn close signal , will stop read browser conn , cliID is : %v , cID is : %v , sID is : %v !", cliID, cID, sID)
 				return
 			default:

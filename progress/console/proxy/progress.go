@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"github.com/godaner/ip/endpoint"
 	"github.com/godaner/ip/endpoint/proxy"
 	"log"
 )
@@ -13,22 +14,23 @@ func (p *Progress) Launch() (err error) {
 	log.SetFlags(log.Lmicroseconds)
 	// config
 	c := new(Config)
-	err = c.Load()
-	if err != nil {
-		return err
-	}
-
-	pry := &proxy.Proxy{
-		LocalPort:  c.LocalPort,
-		IPPVersion: c.IPPVersion,
-		V2Secret:   c.V2Secret,
-	}
-	go func() {
-		err := pry.Start()
-		if err != nil {
-			log.Printf("Progress#Start : start client err , err is : %v !", err.Error())
+	var pry endpoint.Endpoint
+	c.SetUpdateEventHandler(func(c *Config) {
+		if pry != nil {
+			pry.Destroy()
 		}
-	}()
+		pry = &proxy.Proxy{
+			LocalPort:  c.LocalPort,
+			IPPVersion: c.IPPVersion,
+			V2Secret:   c.V2Secret,
+		}
+		go func() {
+			err := pry.Start()
+			if err != nil {
+				log.Printf("Progress#Launch : start client err , err is : %v !", err.Error())
+			}
+		}()
+	})
 
 	return nil
 }

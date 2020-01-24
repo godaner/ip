@@ -127,10 +127,10 @@ func (p *Client) init() {
 			for {
 				select {
 				case <-p.destroySignal:
-					log.Printf("Client#init : get destroy the client signal , we will destroy the client, cliID is : %v !", p.cliID)
+					log.Printf("Client#init : get destroy the client signal , we will destroy the client , cliID is : %v !", p.cliID)
 					return
 				case <-p.stopSignal: // wanna stop
-					log.Printf("Client#init : get stop the client signal , we will stop the client, cliID is : %v !", p.cliID)
+					log.Printf("Client#init : get stop the client signal , we will stop the client , cliID is : %v !", p.cliID)
 					continue
 				}
 			}
@@ -139,7 +139,7 @@ func (p *Client) init() {
 			for {
 				select {
 				case <-p.destroySignal:
-					log.Printf("Client#init : get destroy the client signal , we will destroy the client, cliID is : %v !", p.cliID)
+					log.Printf("Client#init : get destroy the client signal , we will destroy the client , cliID is : %v !", p.cliID)
 					return
 				case <-p.startSignal: // wanna start
 					log.Printf("Client#init : get start the client signal , we will start the client in %vs, cliID is : %v !", restart_interval, p.cliID)
@@ -194,13 +194,13 @@ func (p *Client) listenProxy() {
 	p.proxyConn.AddCloseTrigger(func(conn net.Conn) {
 		log.Printf("Client#listenProxy : proxy conn is close by self , cliID is : %v  !", p.cliID)
 		p.Restart()
-	}, &ipnet.CloseTrigger{
+	}, &ipnet.ConnCloseTrigger{
 		Signal: p.stopSignal,
 		Handler: func(conn net.Conn) {
 			log.Printf("Client#listenProxy : proxy conn is close by stopSignal , cliID is : %v  !", p.cliID)
 			p.proxyConn.Close()
 		},
-	}, &ipnet.CloseTrigger{
+	}, &ipnet.ConnCloseTrigger{
 		Signal: p.destroySignal,
 		Handler: func(conn net.Conn) {
 			log.Printf("Client#listenProxy : proxy conn is close by destroySignal , cliID is : %v  !", p.cliID)
@@ -356,7 +356,7 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 		}
 		p.forwardConnRID.Delete(cID)
 		p.sendForwardConnCloseEvent(cID, sID)
-	}, &ipnet.CloseTrigger{
+	}, &ipnet.ConnCloseTrigger{
 		Signal: p.stopSignal,
 		Handler: func(conn net.Conn) {
 			log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by stopSignal , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
@@ -368,7 +368,7 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 			p.sendForwardConnCloseEvent(cID, sID)
 			forwardConn.Close()
 		},
-	}, &ipnet.CloseTrigger{
+	}, &ipnet.ConnCloseTrigger{
 		Signal: p.destroySignal,
 		Handler: func(conn net.Conn) {
 			log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by destroySignal , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
@@ -380,7 +380,7 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 			p.sendForwardConnCloseEvent(cID, sID)
 			forwardConn.Close()
 		},
-	}, &ipnet.CloseTrigger{
+	}, &ipnet.ConnCloseTrigger{
 		Signal: p.proxyConn.CloseSignal(),
 		Handler: func(conn net.Conn) {
 			log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by proxyConn.CloseSignal , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)

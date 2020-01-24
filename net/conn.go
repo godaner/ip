@@ -58,26 +58,12 @@ func (i *IPConn) CloseSignal() (c chan bool) {
 	return i.isClose
 }
 
-//func (i *IPConn) AddCloseHandler(closeHandler ConnCloseHandler) {
-//	i.init()
-//	if len(i.closeHandlers) <= 0 {
-//		i.closeHandlers = []ConnCloseHandler{}
-//	}
-//	i.closeHandlers = append(i.closeHandlers, closeHandler)
-//	go func() {
-//		select {
-//		case <-i.CloseSignal():
-//			closeHandler(i)
-//		}
-//	}()
-//
-//}
-type CloseTrigger struct {
+type ConnCloseTrigger struct {
 	Signal  chan bool
 	Handler ConnCloseHandler
 }
 
-func (i *IPConn) AddCloseTrigger(selfCloseHandler ConnCloseHandler, triggers ...*CloseTrigger) {
+func (i *IPConn) AddCloseTrigger(selfCloseHandler ConnCloseHandler, triggers ...*ConnCloseTrigger) {
 	i.init()
 	over := make(chan bool)
 	go func() {
@@ -85,7 +71,11 @@ func (i *IPConn) AddCloseTrigger(selfCloseHandler ConnCloseHandler, triggers ...
 		case <-over:
 			return
 		case <-i.CloseSignal():
-			close(over)
+			select {
+			case <-over:
+			default:
+				close(over)
+			}
 			if selfCloseHandler != nil {
 				selfCloseHandler(i)
 			}
@@ -98,7 +88,11 @@ func (i *IPConn) AddCloseTrigger(selfCloseHandler ConnCloseHandler, triggers ...
 			case <-over:
 				return
 			case <-tri.Signal:
-				close(over)
+				select {
+				case <-over:
+				default:
+					close(over)
+				}
 				if tri.Handler != nil {
 					tri.Handler(i)
 				}
