@@ -19,6 +19,7 @@ import (
 const (
 	restart_interval           = 5
 	wait_server_hello_time_sec = 5
+	hb_interval_sec            = 10
 )
 
 type Client struct {
@@ -529,6 +530,9 @@ func (p *Client) proxyHelloHandler(m ipp.Message, cID uint16, sID uint16) {
 		return
 	}
 	log.Printf("Client#proxyHelloHandler : accept proxy hello , and listen port success in porxy side , cliID is : %v , port is : %v , cID is : %v , sID is : %v !", p.cliID, port, cID, sID)
+
+	//// client heart beat msg ////
+	go p.hb()
 	return
 }
 
@@ -537,4 +541,38 @@ func (p *Client) newSerialNo() uint16 {
 	atomic.CompareAndSwapInt32(&p.seq, math.MaxUint16, 0)
 	atomic.AddInt32(&p.seq, 1)
 	return uint16(p.seq)
+}
+
+// hb heart beat
+func (p *Client) hb() {
+	p.sendHB()
+	ticker := time.NewTicker(time.Duration(hb_interval_sec) * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.proxyConn.CloseSignal():
+			log.Printf("Client#hb : will stop send heart beat to proxy , cliID is : %v !", p.cliID)
+			return
+		case <-ticker.C:
+			p.sendHB()
+		}
+	}
+}
+
+// sendHB
+func (p *Client) sendHB() {
+	sID := p.newSerialNo()
+	log.Printf("Client#sendHB : will send heart beat to proxy , cliID is : %v , sID is : %v !", p.cliID, sID)
+	m := ippnew.NewMessage(p.IPPVersion, ippnew.SetV2Secret(p.V2Secret))
+	m.ForConnHB(p.cliID, 0, sID)
+	//marshal
+	b := m.Marshall()
+	ippLen := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(ippLen, uint32(len(b)))
+	b = append(ippLen, b...)
+	_, err := p.proxyConn.Write(b)
+	if err != nil {
+		log.Printf("Client#sendHB : send heart beat to proxy , cliID is : %v , sID is : %v , err is : %v !", p.cliID, sID, err.Error())
+		return
+	}
 }

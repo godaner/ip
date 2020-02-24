@@ -21,6 +21,7 @@ import (
 const (
 	restart_interval           = 5
 	wait_server_hello_time_sec = 5
+	hb_interval_sec            = 15
 )
 
 type Proxy struct {
@@ -207,8 +208,13 @@ func (p *Proxy) acceptClientConn(cl *ipnet.IPListener) {
 				log.Printf("Proxy#acceptClientConn : accept client conn err , err is : %v !", err.Error())
 				continue
 			}
+
 			// client conn
 			cc := c.(*ipnet.IPConn)
+			// set hb interval and check client heart beat
+			cc.SetHeartBeatInterval(time.Duration(hb_interval_sec) * time.Second)
+			go p.checkClientHB(cc)
+			// add trigger
 			cc.AddCloseTrigger(func(conn net.Conn) {
 				log.Printf("Proxy#acceptClientConn : client conn close by self !")
 			}, &ipnet.ConnCloseTrigger{
@@ -284,6 +290,9 @@ func (p *Proxy) receiveClientMsg(clientConn *ipnet.IPConn) {
 				log.Printf("Proxy#receiveClientMsg : receive client req , cliID is : %v , cID is : %v , sID is : %v !", cliID, cID, sID)
 				// receive client req , we should judge the client port , and dispatch the data to all browser who connect to this port.
 				p.clientReqHandler(clientConn, m)
+			case ipp.MSG_TYPE_CONN_HB:
+				log.Printf("Proxy#receiveClientMsg : receive client heart beat , cliID is : %v , cID is : %v , sID is : %v !", cliID, cID, sID)
+				p.clientHBHandler(clientConn, m)
 			}
 		}
 	}
@@ -340,7 +349,6 @@ func (p *Proxy) clientHelloHandler(clientConn *ipnet.IPConn, clientWannaProxyPor
 	}
 	// say hello to client , if listen fail , return "" port to client
 	p.sayHello(clientConn, clientWannaProxyPort, sID)
-
 }
 
 // listenBrowser
@@ -569,4 +577,15 @@ func (p *Proxy) newCID() uint16 {
 	rand.Seed(time.Now().UnixNano())
 	r := rand.Intn(math.MaxUint16)
 	return uint16(r)
+}
+
+// clientHBHandler
+func (p *Proxy) clientHBHandler(conn *ipnet.IPConn, message ipp.Message) {
+	conn.ResetHeartBeatTimer()
+}
+
+// checkClientHB
+func (p *Proxy) checkClientHB(clientConn *ipnet.IPConn) {
+	<-clientConn.GetHeartBeatTimer().C
+	clientConn.Close()
 }

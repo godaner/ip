@@ -22,6 +22,8 @@ const (
 	MSG_TYPE_CONN_CREATE_DONE = iota
 	// 连接断开通知
 	MSG_TYPE_CONN_CLOSE = iota
+	// 心跳
+	MSG_TYPE_CONN_HB = iota
 )
 
 const (
@@ -59,4 +61,5 @@ type Message interface {
 	ForConnCreate(body []byte, cliID, cID, sID uint16)
 	ForConnClose(body []byte, cliID, cID, sID uint16)
 	ForConnCreateDone(body []byte, cliID, cID, sID uint16)
+	ForConnHB(cliID, cID, sID uint16)
 }

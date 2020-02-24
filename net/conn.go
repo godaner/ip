@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 // ConnCloseHandler
@@ -17,6 +18,8 @@ type IPConn struct {
 	sync.Mutex
 	closeHandlers []ConnCloseHandler
 	sync.Once
+	hbTimer    *time.Timer
+	hbInterval time.Duration
 }
 
 func (i *IPConn) init() {
@@ -29,7 +32,19 @@ func NewIPConn(conn net.Conn) *IPConn {
 		Conn: conn,
 	}
 }
-
+func (i *IPConn) SetHeartBeatInterval(hbInterval time.Duration) {
+	i.init()
+	i.hbInterval = hbInterval
+	i.hbTimer = time.NewTimer(i.hbInterval)
+}
+func (i *IPConn) GetHeartBeatTimer() (t *time.Timer) {
+	i.init()
+	return i.hbTimer
+}
+func (i *IPConn) ResetHeartBeatTimer() {
+	i.init()
+	i.hbTimer.Reset(i.hbInterval)
+}
 func (i *IPConn) Read(b []byte) (n int, err error) {
 	i.init()
 	n, err = i.Conn.Read(b)

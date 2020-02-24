@@ -231,7 +231,9 @@ func (m *Message) UnMarshall(message []byte) (err error) {
 	}
 	return nil
 }
-
+func (m *Message) ForConnHB(cliID, cID, sID uint16) {
+	m.newMessage(ipp.MSG_TYPE_CONN_HB, cliID, cID, sID, 0)
+}
 func (m *Message) ForConnCreateDone(body []byte, cliID, cID, sID uint16) {
 	m.newMessage(ipp.MSG_TYPE_CONN_CREATE_DONE, cliID, cID, sID, 0)
 }
