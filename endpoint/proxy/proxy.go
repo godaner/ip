@@ -139,12 +139,12 @@ func (p *Proxy) init() {
 					return
 				case <-p.startSignal: // wanna start
 					log.Printf("Proxy#init : get start the proxy signal , we will start the proxy in %vs !", restart_interval)
-					time.Sleep(restart_interval * time.Second)
+					ticker := time.NewTimer(restart_interval * time.Second)
 					select {
 					case <-p.stopSignal:
 						log.Printf("Proxy#init : when we wanna start proxy , but get stop signal , so stop the proxy !")
 						continue
-					default:
+					case <-ticker.C:
 						go p.startListen()
 						continue
 					}
@@ -587,5 +587,6 @@ func (p *Proxy) clientHBHandler(conn *ipnet.IPConn, message ipp.Message) {
 // checkClientHB
 func (p *Proxy) checkClientHB(clientConn *ipnet.IPConn) {
 	<-clientConn.GetHeartBeatTimer().C
+	log.Printf("Proxy#checkClientHB : not receive the client heart beat , client info is : %v->%v !", clientConn.LocalAddr(), clientConn.RemoteAddr())
 	clientConn.Close()
 }

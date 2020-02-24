@@ -144,12 +144,12 @@ func (p *Client) init() {
 					return
 				case <-p.startSignal: // wanna start
 					log.Printf("Client#init : get start the client signal , we will start the client in %vs, cliID is : %v !", restart_interval, p.cliID)
-					time.Sleep(restart_interval * time.Second)
+					ticker := time.NewTimer(restart_interval * time.Second)
 					select {
 					case <-p.stopSignal:
 						log.Printf("Client#init : when we wanna start client , but get stop signal , so stop the client , cliID is : %v !", p.cliID)
 						continue
-					default:
+					case <-ticker.C:
 						go p.listenProxy()
 						continue
 					}
@@ -292,10 +292,10 @@ func (p *Client) receiveProxyMsg() {
 				log.Printf("Client#receiveProxyMsg : receive proxy hello , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyHelloHandler(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CREATE:
-				log.Printf("Client#receiveProxyMsg : receive proxy conn create , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+				log.Printf("Client#receiveProxyMsg : receive browser conn create , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyCreateBrowserConnHandler(m, cID, sID)
 			case ipp.MSG_TYPE_CONN_CLOSE:
-				log.Printf("Client#receiveProxyMsg : receive proxy conn close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
+				log.Printf("Client#receiveProxyMsg : receive browser conn close , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 				p.proxyCloseBrowserConnHandler(cID, sID)
 			case ipp.MSG_TYPE_REQ:
 				log.Printf("Client#receiveProxyMsg : receive proxy req , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
