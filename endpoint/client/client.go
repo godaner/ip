@@ -3,9 +3,12 @@ package client
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"github.com/godaner/ip/endpoint"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
 	ipnet "github.com/godaner/ip/net"
+	"github.com/looplab/fsm"
 	"io"
 	"log"
 	"math"
@@ -36,14 +39,13 @@ type Client struct {
 	proxyHelloSignal     chan bool
 	destroySignal        chan bool
 	stopSignal           chan bool
-	startSignal          chan bool
-	isStart              bool
 	sync.Once
+	fsm *fsm.FSM
 }
 
 func (p *Client) Destroy() error {
-	close(p.destroySignal)
-	return nil
+	p.init()
+	return p.fsm.Event(string(endpoint.Event_Destroy))
 }
 
 func (p *Client) GetID() (id uint16) {
@@ -51,66 +53,35 @@ func (p *Client) GetID() (id uint16) {
 	return p.cliID
 }
 
-func (p *Client) IsStart() bool {
+func (p *Client) Status() endpoint.Status {
 	p.init()
-	return p.isStart
+	return endpoint.Status(p.fsm.Current())
 }
 
 func (p *Client) Restart() error {
 	p.init()
-	if p.IsStart() {
-		err := p.Stop()
-		if err != nil {
-			return err
-		}
-	}
-	err := p.Start()
+	err := p.fsm.Event(string(endpoint.Event_Stop))
 	if err != nil {
 		return err
 	}
-	return nil
+	log.Printf("Client#Restart : we will restart the client in %vs , pls wait a moment !", restart_interval)
+	destroySignal := p.destroySignal
+	select {
+	case <-destroySignal:
+		return errors.New("when we wanna start progress , get a destroy signal")
+	case <-time.After(time.Duration(restart_interval) * time.Second):
+		return p.fsm.Event(string(endpoint.Event_Start))
+	}
 }
 
 func (p *Client) Start() (err error) {
 	p.init()
-	if p.IsStart() {
-		return
-	}
-	if p.startSignal == nil {
-		return nil
-	}
-	startSignal := p.startSignal
-	select {
-	case <-startSignal:
-		// already start , never happen
-	default:
-		// omit start signal
-		p.isStart = true
-		p.startSignal = make(chan bool)
-		close(startSignal)
-	}
-	return nil
+	return p.fsm.Event(string(endpoint.Event_Start))
 }
+
 func (p *Client) Stop() (err error) {
 	p.init()
-	if !p.IsStart() {
-		return
-	}
-	if p.stopSignal == nil {
-		return nil
-	}
-	stopSignal := p.stopSignal
-	select {
-	case <-stopSignal:
-		// already stop , never happen
-	default:
-		// omit close signal
-		p.isStart = false
-		p.stopSignal = make(chan bool)
-		close(stopSignal)
-
-	}
-	return nil
+	return p.fsm.Event(string(endpoint.Event_Stop))
 }
 
 // init
@@ -118,46 +89,33 @@ func (p *Client) init() {
 	p.Do(func() {
 		//// init var ////
 		p.destroySignal = make(chan bool)
-		p.stopSignal = make(chan bool)
-		p.startSignal = make(chan bool)
 		// temp client id
 		p.cliID = p.TempCliID
 		// handler
 
-		go func() {
-			for {
-				select {
-				case <-p.destroySignal:
-					log.Printf("Client#init : get destroy the client signal , we will destroy the client , cliID is : %v !", p.cliID)
-					return
-				case <-p.stopSignal: // wanna stop
-					log.Printf("Client#init : get stop the client signal , we will stop the client , cliID is : %v !", p.cliID)
-					continue
-				}
-			}
-		}()
-		go func() {
-			for {
-				select {
-				case <-p.destroySignal:
-					log.Printf("Client#init : get destroy the client signal , we will destroy the client , cliID is : %v !", p.cliID)
-					return
-				case <-p.startSignal: // wanna start
-					log.Printf("Client#init : get start the client signal , we will start the client in %vs, cliID is : %v !", restart_interval, p.cliID)
-					ticker := time.NewTimer(restart_interval * time.Second)
-					select {
-					case <-p.stopSignal:
-						log.Printf("Client#init : when we wanna start client , but get stop signal , so stop the client , cliID is : %v !", p.cliID)
-						continue
-					case <-ticker.C:
-						go p.listenProxy()
-						continue
-					}
-				}
-			}
-		}()
-		// wait the select
-		time.Sleep(500 * time.Millisecond)
+		// fsm
+		p.fsm = fsm.NewFSM(
+			string(endpoint.Status_Stoped),
+			fsm.Events{
+				{Name: string(endpoint.Event_Start), Src: []string{string(endpoint.Status_Stoped)}, Dst: string(endpoint.Status_Started)},
+				{Name: string(endpoint.Event_Stop), Src: []string{string(endpoint.Status_Started)}, Dst: string(endpoint.Status_Stoped)},
+				{Name: string(endpoint.Event_Destroy), Src: []string{string(endpoint.Status_Started), string(endpoint.Status_Stoped)}, Dst: string(endpoint.Status_Destroied)},
+			},
+			fsm.Callbacks{
+				string(endpoint.Event_Start): func(event *fsm.Event) {
+					p.stopSignal = make(chan bool)
+					p.forwardConnRID = sync.Map{}
+					go p.listenProxy()
+				},
+				string(endpoint.Event_Stop): func(event *fsm.Event) {
+					close(p.stopSignal)
+				},
+				string(endpoint.Event_Destroy): func(event *fsm.Event) {
+					close(p.stopSignal)
+					close(p.destroySignal)
+				},
+			},
+		)
 	})
 
 }
@@ -178,10 +136,6 @@ func (p *Client) listenProxy() {
 	//// print info ////
 	i, _ := json.Marshal(p)
 	log.Printf("Client#listenProxy : start listen proxy , print client info , cliID is : %v , info is : %v !", p.cliID, string(i))
-
-	//// init var ////
-	// reset restart signal
-	p.forwardConnRID = sync.Map{}
 
 	//// dial proxy conn ////
 	addr := p.ProxyAddr

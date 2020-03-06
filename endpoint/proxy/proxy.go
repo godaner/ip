@@ -3,9 +3,12 @@ package proxy
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"github.com/godaner/ip/endpoint"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
 	ipnet "github.com/godaner/ip/net"
+	"github.com/looplab/fsm"
 	"io"
 	"log"
 	"math"
@@ -19,9 +22,8 @@ import (
 )
 
 const (
-	restart_interval           = 5
-	wait_server_hello_time_sec = 5
-	hb_interval_sec            = 15
+	restart_interval = 5
+	hb_interval_sec  = 15
 )
 
 type Proxy struct {
@@ -32,81 +34,50 @@ type Proxy struct {
 	seq            int32
 	destroySignal  chan bool
 	stopSignal     chan bool
-	startSignal    chan bool
 	isStart        bool
 	sync.Once
-}
-
-func (p *Proxy) IsStart() bool {
-	p.init()
-	return p.isStart
+	fsm *fsm.FSM
 }
 
 func (p *Proxy) Destroy() error {
-	close(p.destroySignal)
-	return nil
+	p.init()
+	return p.fsm.Event(string(endpoint.Event_Destroy))
 }
 
-func (p *Proxy) GetID() uint16 {
-	return 0
+func (p *Proxy) GetID() (id uint16) {
+	p.init()
+	return uint16(0)
+}
+
+func (p *Proxy) Status() endpoint.Status {
+	p.init()
+	return endpoint.Status(p.fsm.Current())
 }
 
 func (p *Proxy) Restart() error {
 	p.init()
-	if p.IsStart() {
-		err := p.Stop()
-		if err != nil {
-			return err
-		}
-	}
-	err := p.Start()
+	err := p.fsm.Event(string(endpoint.Event_Stop))
 	if err != nil {
 		return err
 	}
-	return nil
-}
-
-func (p *Proxy) Stop() (err error) {
-	p.init()
-	if !p.IsStart() {
-		return
-	}
-	if p.stopSignal == nil {
-		return nil
-	}
-	stopSignal := p.stopSignal
+	log.Printf("Client#Restart : we will restart the proxy in %vs , pls wait a moment !", restart_interval)
+	destroySignal := p.destroySignal
 	select {
-	case <-stopSignal:
-		// already stop , never happen
-	default:
-		// omit close signal
-		p.isStart = false
-		p.stopSignal = make(chan bool)
-		close(stopSignal)
-
+	case <-destroySignal:
+		return errors.New("when we wanna start progress , get a destroy signal")
+	case <-time.After(time.Duration(restart_interval) * time.Second):
+		return p.fsm.Event(string(endpoint.Event_Start))
 	}
-	return nil
 }
 
 func (p *Proxy) Start() (err error) {
 	p.init()
-	if p.IsStart() {
-		return
-	}
-	if p.startSignal == nil {
-		return nil
-	}
-	startSignal := p.startSignal
-	select {
-	case <-startSignal:
-		// already start , never happen
-	default:
-		// omit start signal
-		p.isStart = true
-		p.startSignal = make(chan bool)
-		close(startSignal)
-	}
-	return nil
+	return p.fsm.Event(string(endpoint.Event_Start))
+}
+
+func (p *Proxy) Stop() (err error) {
+	p.init()
+	return p.fsm.Event(string(endpoint.Event_Stop))
 }
 
 // init
@@ -114,46 +85,29 @@ func (p *Proxy) init() {
 	p.Do(func() {
 		//// init var ////
 		p.destroySignal = make(chan bool)
-		p.stopSignal = make(chan bool)
-		p.startSignal = make(chan bool)
-
-		//// log ////
-		p.browserConnRID = sync.Map{} // map[uint16]net.Conn{}
-		go func() {
-			for {
-				select {
-				case <-p.destroySignal:
-					log.Printf("Proxy#init : get destroy the proxy signal , we will destroy the proxy !")
-					return
-				case <-p.stopSignal:
-					log.Printf("Proxy#init : get stop the proxy signal , we will stop the proxy !")
-					continue
-				}
-			}
-		}()
-		go func() {
-			for {
-				select {
-				case <-p.destroySignal:
-					log.Printf("Proxy#init : get destroy the proxy signal , we will destroy the proxy !")
-					return
-				case <-p.startSignal: // wanna start
-					log.Printf("Proxy#init : get start the proxy signal , we will start the proxy in %vs !", restart_interval)
-					ticker := time.NewTimer(restart_interval * time.Second)
-					select {
-					case <-p.stopSignal:
-						log.Printf("Proxy#init : when we wanna start proxy , but get stop signal , so stop the proxy !")
-						continue
-					case <-ticker.C:
-						go p.startListen()
-						continue
-					}
-				}
-			}
-		}()
-
-		// wait the select
-		time.Sleep(500 * time.Millisecond)
+		// fsm
+		p.fsm = fsm.NewFSM(
+			string(endpoint.Status_Stoped),
+			fsm.Events{
+				{Name: string(endpoint.Event_Start), Src: []string{string(endpoint.Status_Stoped)}, Dst: string(endpoint.Status_Started)},
+				{Name: string(endpoint.Event_Stop), Src: []string{string(endpoint.Status_Started)}, Dst: string(endpoint.Status_Stoped)},
+				{Name: string(endpoint.Event_Destroy), Src: []string{string(endpoint.Status_Started), string(endpoint.Status_Stoped)}, Dst: string(endpoint.Status_Destroied)},
+			},
+			fsm.Callbacks{
+				string(endpoint.Event_Start): func(event *fsm.Event) {
+					p.stopSignal = make(chan bool)
+					p.browserConnRID = sync.Map{} // map[uint16]net.Conn{}
+					go p.startListen()
+				},
+				string(endpoint.Event_Stop): func(event *fsm.Event) {
+					close(p.stopSignal)
+				},
+				string(endpoint.Event_Destroy): func(event *fsm.Event) {
+					close(p.stopSignal)
+					close(p.destroySignal)
+				},
+			},
+		)
 	})
 
 }

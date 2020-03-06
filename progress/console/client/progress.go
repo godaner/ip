@@ -37,7 +37,7 @@ func (p *Progress) Launch() (err error) {
 
 			clis = append(clis, cli)
 			go func() {
-				err := cli.Restart()
+				err := cli.Start()
 				if err != nil {
 					log.Printf("Progress#Launch : restart client err , client id is : %v , err is : %v !", cliID, err.Error())
 				}
