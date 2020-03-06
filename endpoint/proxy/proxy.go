@@ -90,19 +90,19 @@ func (p *Proxy) init() {
 			fsm.Callbacks{
 				string(endpoint.Event_Start): func(event *fsm.Event) {
 					jb, _ := json.Marshal(event)
-					log.Printf("Client#int : receive fsm start event , event is : %v !", string(jb))
+					log.Printf("Proxy#int : receive fsm start event , event is : %v !", string(jb))
 					p.stopSignal = make(chan bool)
 					p.browserConnRID = sync.Map{}
 					go p.startListen()
 				},
 				string(endpoint.Event_Stop): func(event *fsm.Event) {
 					jb, _ := json.Marshal(event)
-					log.Printf("Client#int : receive fsm stop event , event is : %v !", string(jb))
+					log.Printf("Proxy#int : receive fsm stop event , event is : %v !", string(jb))
 					close(p.stopSignal)
 				},
 				string(endpoint.Event_Destroy): func(event *fsm.Event) {
 					jb, _ := json.Marshal(event)
-					log.Printf("Client#int : receive fsm destroy event , event is : %v !", string(jb))
+					log.Printf("Proxy#int : receive fsm destroy event , event is : %v !", string(jb))
 					if event.Src != string(endpoint.Status_Stoped) { // maybe from started
 						close(p.stopSignal)
 					}
