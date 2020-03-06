@@ -3,7 +3,6 @@ package client
 import (
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"github.com/godaner/ip/endpoint"
 	"github.com/godaner/ip/ipp"
 	"github.com/godaner/ip/ipp/ippnew"
@@ -65,13 +64,8 @@ func (p *Client) Restart() error {
 		return err
 	}
 	log.Printf("Client#Restart : we will restart the client in %vs , pls wait a moment !", restart_interval)
-	destroySignal := p.destroySignal
-	select {
-	case <-destroySignal:
-		return errors.New("when we wanna start progress , get a destroy signal")
-	case <-time.After(time.Duration(restart_interval) * time.Second):
-		return p.fsm.Event(string(endpoint.Event_Start))
-	}
+	<-time.After(time.Duration(restart_interval) * time.Second)
+	return p.fsm.Event(string(endpoint.Event_Start))
 }
 
 func (p *Client) Start() (err error) {
@@ -103,15 +97,23 @@ func (p *Client) init() {
 			},
 			fsm.Callbacks{
 				string(endpoint.Event_Start): func(event *fsm.Event) {
+					jb, _ := json.Marshal(event)
+					log.Printf("Client#int : receive fsm start event , cliID is : %v , event is : %v !", p.cliID, string(jb))
 					p.stopSignal = make(chan bool)
 					p.forwardConnRID = sync.Map{}
 					go p.listenProxy()
 				},
 				string(endpoint.Event_Stop): func(event *fsm.Event) {
+					jb, _ := json.Marshal(event)
+					log.Printf("Client#int : receive fsm stop event , cliID is : %v , event is : %v !", p.cliID, string(jb))
 					close(p.stopSignal)
 				},
 				string(endpoint.Event_Destroy): func(event *fsm.Event) {
-					close(p.stopSignal)
+					jb, _ := json.Marshal(event)
+					log.Printf("Client#int : receive fsm destroy event , cliID is : %v , event is : %v !", p.cliID, string(jb))
+					if event.Src != string(endpoint.Status_Stoped) { // maybe from started
+						close(p.stopSignal)
+					}
 					close(p.destroySignal)
 				},
 			},
@@ -153,12 +155,6 @@ func (p *Client) listenProxy() {
 		Signal: p.stopSignal,
 		Handler: func(conn net.Conn) {
 			log.Printf("Client#listenProxy : proxy conn is close by stopSignal , cliID is : %v  !", p.cliID)
-			p.proxyConn.Close()
-		},
-	}, &ipnet.ConnCloseTrigger{
-		Signal: p.destroySignal,
-		Handler: func(conn net.Conn) {
-			log.Printf("Client#listenProxy : proxy conn is close by destroySignal , cliID is : %v  !", p.cliID)
 			p.proxyConn.Close()
 		},
 	})
@@ -315,18 +311,6 @@ func (p *Client) proxyCreateBrowserConnHandler(m ipp.Message, cID, sID uint16) {
 		Signal: p.stopSignal,
 		Handler: func(conn net.Conn) {
 			log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by stopSignal , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
-			_, ok := p.forwardConnRID.Load(cID)
-			if !ok {
-				return
-			}
-			p.forwardConnRID.Delete(cID)
-			p.sendForwardConnCloseEvent(cID, sID)
-			forwardConn.Close()
-		},
-	}, &ipnet.ConnCloseTrigger{
-		Signal: p.destroySignal,
-		Handler: func(conn net.Conn) {
-			log.Printf("Client#proxyCreateBrowserConnHandler : forward conn is close by destroySignal , cliID is : %v , cID is : %v , sID is : %v !", p.cliID, cID, sID)
 			_, ok := p.forwardConnRID.Load(cID)
 			if !ok {
 				return

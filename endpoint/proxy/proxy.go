@@ -133,12 +133,6 @@ func (p *Proxy) startListen() {
 				log.Printf("Proxy#startListen : client listener close by stopSignal !")
 				listener.Close()
 			},
-		}, &ipnet.ListenerCloseTrigger{
-			Signal: p.destroySignal,
-			Handler: func(listener net.Listener) {
-				log.Printf("Proxy#startListen : client listener close by destroySignal !")
-				listener.Close()
-			},
 		})
 		log.Printf("Proxy#startListen : local addr is : %v !", addr)
 
@@ -181,12 +175,6 @@ func (p *Proxy) acceptClientConn(cl *ipnet.IPListener) {
 				Signal: p.stopSignal,
 				Handler: func(conn net.Conn) {
 					log.Printf("Proxy#acceptClientConn : client conn close by client stopSignal !")
-					conn.Close()
-				},
-			}, &ipnet.ConnCloseTrigger{
-				Signal: p.destroySignal,
-				Handler: func(conn net.Conn) {
-					log.Printf("Proxy#acceptClientConn : client conn close by client destroySignal !")
 					conn.Close()
 				},
 			})
@@ -330,12 +318,6 @@ func (p *Proxy) listenBrowser(clientConn *ipnet.IPConn, clientWannaProxyPort str
 			log.Printf("Proxy#listenBrowser : browser listener close by client conn closeSignal !")
 			bl.Close()
 		},
-	}, &ipnet.ListenerCloseTrigger{
-		Signal: p.destroySignal,
-		Handler: func(listener net.Listener) {
-			log.Printf("Proxy#listenBrowser : browser listener close by destroySignal !")
-			bl.Close()
-		},
 	})
 	log.Printf("Proxy#listenBrowser : listen browser port is : %v !", clientWannaProxyPort)
 	go func() {
@@ -365,14 +347,6 @@ func (p *Proxy) listenBrowser(clientConn *ipnet.IPConn, clientWannaProxyPort str
 					Signal: p.stopSignal,
 					Handler: func(conn net.Conn) {
 						log.Println("Proxy#listenBrowser : browser conn close by stopSignal !")
-						p.browserConnRID.Delete(cID)
-						p.sendBrowserConnCloseEvent(clientConn, cliID, cID, sID)
-						return
-					},
-				}, &ipnet.ConnCloseTrigger{
-					Signal: p.destroySignal,
-					Handler: func(conn net.Conn) {
-						log.Println("Proxy#listenBrowser : browser conn close by destroySignal !")
 						p.browserConnRID.Delete(cID)
 						p.sendBrowserConnCloseEvent(clientConn, cliID, cID, sID)
 						return
